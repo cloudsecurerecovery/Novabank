@@ -1,0 +1,5 @@
+{
+  "name": "NovaBank",
+  "description": "A secure online banking-style web application with real-time chat, transactions, and use supabase as admin dashboard.",
+  "requestFramePermissions": []
+}
