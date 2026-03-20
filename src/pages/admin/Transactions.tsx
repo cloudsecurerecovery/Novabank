@@ -35,6 +35,11 @@ interface Transaction {
     full_name: string;
     email: string;
   };
+  user_documents?: {
+    id: string;
+    file_path: string;
+    file_name: string;
+  }[];
 }
 
 export default function AdminTransactions() {
@@ -51,6 +56,7 @@ export default function AdminTransactions() {
   const [bulkNoticeMessage, setBulkNoticeMessage] = useState('');
   const [bulkNoticeLoading, setBulkNoticeLoading] = useState(false);
   const [bulkNoticeSuccess, setBulkNoticeSuccess] = useState(false);
+  const [checkImages, setCheckImages] = useState<Record<string, string>>({});
 
   const fetchTransactions = useCallback(async () => {
     try {
@@ -58,7 +64,8 @@ export default function AdminTransactions() {
         .from('transactions')
         .select(`
           *,
-          profiles:user_id (full_name, email)
+          profiles:user_id (full_name, email),
+          user_documents:user_documents(id, file_path, file_name)
         `)
         .order('created_at', { ascending: false });
 
@@ -74,6 +81,29 @@ export default function AdminTransactions() {
   useEffect(() => {
     fetchTransactions();
   }, [fetchTransactions]);
+
+  useEffect(() => {
+    const loadCheckImages = async () => {
+      if (!expandedTxId) return;
+      const tx = transactions.find(t => t.id === expandedTxId);
+      if (!tx?.user_documents?.length) return;
+
+      const { storageService } = await import('../../services/storageService');
+      const urls: Record<string, string> = {};
+      
+      for (const doc of tx.user_documents) {
+        try {
+          const url = await storageService.getSignedUrl(doc.file_path);
+          urls[doc.id] = url;
+        } catch (e) {
+          console.error('Failed to get signed URL', e);
+        }
+      }
+      setCheckImages(prev => ({ ...prev, ...urls }));
+    };
+
+    loadCheckImages();
+  }, [expandedTxId, transactions]);
 
   const handleStatusChange = async (id: string, newStatus: string) => {
     setActionLoading(id);
@@ -540,12 +570,37 @@ export default function AdminTransactions() {
                   <div className="space-y-4">
                     <div className="flex items-center gap-2 text-slate-400">
                       <FileText className="w-4 h-4" />
-                      <h4 className="text-[10px] font-bold uppercase tracking-widest">Description</h4>
+                      <h4 className="text-[10px] font-bold uppercase tracking-widest">Description & Documents</h4>
                     </div>
-                    <div className="bg-white p-4 rounded-2xl border border-slate-100 h-full">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-100 space-y-4">
                       <p className="text-sm text-slate-700 leading-relaxed italic">
                         "{transactions.find(t => t.id === expandedTxId)?.description}"
                       </p>
+                      
+                      {transactions.find(t => t.id === expandedTxId)?.user_documents?.length ? (
+                        <div className="grid grid-cols-2 gap-2 pt-4 border-t border-slate-50">
+                          {transactions.find(t => t.id === expandedTxId)?.user_documents?.map(doc => (
+                            <div key={doc.id} className="space-y-1">
+                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{doc.file_name}</p>
+                              {checkImages[doc.id] ? (
+                                <a href={checkImages[doc.id]} target="_blank" rel="noreferrer" className="block relative group overflow-hidden rounded-lg border border-slate-100">
+                                  <img 
+                                    src={checkImages[doc.id]} 
+                                    alt={doc.file_name} 
+                                    className="w-full h-24 object-cover transition-transform group-hover:scale-110"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                    <Download className="w-5 h-5 text-white" />
+                                  </div>
+                                </a>
+                              ) : (
+                                <div className="w-full h-24 bg-slate-50 rounded-lg animate-pulse" />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </div>

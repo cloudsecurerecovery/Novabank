@@ -1,8 +1,8 @@
 import { Link, useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { Building2, LogOut, LayoutDashboard, UserCircle, Users, MessageSquare, DollarSign, Clock, Menu, X, Shield, ArrowDownLeft, Globe } from 'lucide-react';
-import { useState } from 'react';
-
+import { Building2, LogOut, LayoutDashboard, UserCircle, Users, MessageSquare, DollarSign, Clock, Menu, X, Shield, ArrowDownLeft, Globe, Bell, CreditCard } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { supabase } from '../supabaseClient';
 import { AvatarImage } from './AvatarImage';
 
 export default function Layout() {
@@ -10,6 +10,63 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [notificationCount, setNotificationCount] = useState(0);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchCount = async () => {
+      // 1. Count unread admin notes
+      const { count: adminNotesCount, error: adminError } = await supabase
+        .from('admin_notes')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('is_read', false);
+      
+      // 2. Count unread system notifications
+      const { count: systemNotificationsCount, error: systemError } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('read', false);
+      
+      if (!adminError && !systemError) {
+        setNotificationCount((adminNotesCount || 0) + (systemNotificationsCount || 0));
+      }
+    };
+
+    fetchCount();
+
+    // Subscribe to both tables
+    const adminNotesSub = supabase
+      .channel('public:admin_notes_count')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'admin_notes',
+        filter: `user_id=eq.${user.id}`
+      }, () => {
+        fetchCount();
+      })
+      .subscribe();
+
+    const systemNotificationsSub = supabase
+      .channel('public:notifications_count')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'notifications',
+        filter: `user_id=eq.${user.id}`
+      }, () => {
+        fetchCount();
+      })
+      .subscribe();
+
+    return () => {
+      adminNotesSub.unsubscribe();
+      systemNotificationsSub.unsubscribe();
+    };
+  }, [user]);
 
   const handleLogout = () => {
     logout();
@@ -26,6 +83,7 @@ export default function Layout() {
       ]
     : [
         { name: 'Accounts', path: '/dashboard', icon: Building2 },
+        { name: 'Cards', path: '/cards', icon: CreditCard },
         { name: 'Transfer', path: '/transfer', icon: DollarSign },
         { name: 'Deposit', path: '/deposit', icon: ArrowDownLeft },
         { name: 'Wire', path: '/wire-transfer', icon: Globe },
@@ -65,6 +123,17 @@ export default function Layout() {
 
             {/* User Actions */}
             <div className="hidden md:flex items-center gap-6">
+              <Link 
+                to="/notifications" 
+                className="relative p-2 text-white hover:text-[#FFB612] transition-colors"
+              >
+                <Bell className="h-6 w-6" />
+                {notificationCount > 0 && (
+                  <span className="absolute top-1 right-1 bg-red-500 text-white text-[10px] font-bold h-4 w-4 rounded-full flex items-center justify-center border-2 border-[#007856]">
+                    {notificationCount}
+                  </span>
+                )}
+              </Link>
               <div className="flex items-center gap-3">
                 <div className="h-8 w-8 rounded-full bg-white/10 flex items-center justify-center overflow-hidden border border-white/20">
                   <AvatarImage 

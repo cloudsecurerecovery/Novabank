@@ -9,12 +9,16 @@ export type AuditAction =
   | 'avatar_update'
   | 'avatar_remove'
   | 'admin_deposit' 
+  | 'admin_bulk_deposit'
+  | 'admin_transaction_create'
   | 'admin_notification' 
   | 'transaction_status_change'
   | 'password_change'
   | 'registration'
   | 'deposit'
-  | 'wire_transfer';
+  | 'wire_transfer'
+  | 'admin_profile_update'
+  | 'admin_otp_sent';
 
 export interface AuditLog {
   id: string;

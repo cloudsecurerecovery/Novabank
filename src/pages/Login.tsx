@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
-import { Building2, Lock, Mail } from 'lucide-react';
+import { Building2, Lock, Mail, XCircle } from 'lucide-react';
 import { supabase, SUPABASE_URL } from '../supabaseClient';
+import { validateEmail } from '../utils/validation';
 
 export default function Login() {
   const location = useLocation();
@@ -26,6 +27,18 @@ export default function Login() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    // Enhanced Validation
+    if (!validateEmail(email)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -51,7 +64,7 @@ export default function Login() {
         });
         
         // Session will be handled by ProtectedRoute
-        navigate('/dashboard');
+        navigate('/verify-otp');
       } else {
         setError('Login failed: No session returned.');
       }
@@ -90,8 +103,9 @@ export default function Login() {
               </div>
             )}
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm">
-                {error}
+              <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm flex items-start gap-2">
+                <XCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                <span>{error}</span>
               </div>
             )}
             
@@ -112,6 +126,9 @@ export default function Login() {
                   placeholder="you@example.com"
                 />
               </div>
+              {email && !validateEmail(email) && (
+                <p className="mt-1 text-xs text-red-500">Please enter a valid email address.</p>
+              )}
             </div>
 
             <div>

@@ -7,27 +7,33 @@ export interface User {
   is_admin: boolean;
   avatar_url?: string;
   phone?: string;
+  otp_code?: string;
+  otp_expires_at?: string;
 }
 
 interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
+  isOtpVerified: boolean;
   login: (user: User) => void;
   logout: () => void;
   updateUser: (user: Partial<User>) => void;
+  setOtpVerified: (verified: boolean) => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isAuthenticated: false,
+  isOtpVerified: false,
   login: (user) => {
-    set({ user, isAuthenticated: true });
+    set({ user, isAuthenticated: true, isOtpVerified: false });
   },
   logout: () => {
-    set({ user: null, isAuthenticated: false });
+    set({ user: null, isAuthenticated: false, isOtpVerified: false });
   },
   updateUser: (updatedFields) => 
     set((state) => ({
       user: state.user ? { ...state.user, ...updatedFields } : null
     })),
+  setOtpVerified: (verified) => set({ isOtpVerified: verified }),
 }));

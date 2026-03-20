@@ -1,9 +1,18 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { supabase } from '../supabaseClient';
-import { User, Mail, Phone, Camera, CheckCircle2, AlertCircle, Save, Lock, Shield, Trash2 } from 'lucide-react';
+import { User, Mail, Phone, Camera, CheckCircle2, AlertCircle, Save, Lock, Shield, Trash2, FileText, Upload, Download, Loader2, XCircle } from 'lucide-react';
 import { storageService } from '../services/storageService';
 import { AvatarImage } from '../components/AvatarImage';
+import { validatePhone, validatePassword } from '../utils/validation';
+
+interface UserDocument {
+  id: string;
+  file_name: string;
+  file_path: string;
+  file_type: string;
+  created_at: string;
+}
 
 export default function Profile() {
   const { user, updateUser } = useAuthStore();
@@ -16,6 +25,11 @@ export default function Profile() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
+
+  // Documents state
+  const [documents, setDocuments] = useState<UserDocument[]>([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+  const [docUploading, setDocUploading] = useState(false);
 
   // Password change state
   const [newPassword, setNewPassword] = useState('');
@@ -31,8 +45,100 @@ export default function Profile() {
         phone: user.phone || '',
       });
       setProfileImage(user.avatar_url || '');
+      fetchDocuments();
     }
   }, [user]);
+
+  const fetchDocuments = async () => {
+    if (!user) return;
+    setDocsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('user_documents')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setDocuments(data || []);
+    } catch (err) {
+      console.error('Error fetching documents:', err);
+    } finally {
+      setDocsLoading(false);
+    }
+  };
+
+  const handleDocumentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      setDocUploading(true);
+      setError('');
+      
+      if (!e.target.files || e.target.files.length === 0) return;
+
+      const file = e.target.files[0];
+      if (!user) return;
+
+      // Upload to storage
+      const filePath = await storageService.uploadFile(
+        user.id,
+        'documents',
+        `${Date.now()}_${file.name}`,
+        file
+      );
+
+      // Save to database
+      const { error: dbError } = await supabase
+        .from('user_documents')
+        .insert([{
+          user_id: user.id,
+          file_name: file.name,
+          file_path: filePath,
+          file_type: file.type
+        }]);
+
+      if (dbError) throw dbError;
+
+      await fetchDocuments();
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Error uploading document');
+    } finally {
+      setDocUploading(false);
+    }
+  };
+
+  const handleDeleteDocument = async (doc: UserDocument) => {
+    if (!window.confirm('Are you sure you want to delete this document?')) return;
+
+    try {
+      setDocsLoading(true);
+      // Delete from storage
+      await storageService.deleteFile(doc.file_path);
+
+      // Delete from database
+      const { error } = await supabase
+        .from('user_documents')
+        .delete()
+        .eq('id', doc.id);
+
+      if (error) throw error;
+      await fetchDocuments();
+    } catch (err: any) {
+      setError(err.message || 'Error deleting document');
+    } finally {
+      setDocsLoading(false);
+    }
+  };
+
+  const handleDownloadDocument = async (filePath: string) => {
+    try {
+      const url = await storageService.getSignedUrl(filePath);
+      window.open(url, '_blank');
+    } catch (err) {
+      console.error('Error downloading document:', err);
+    }
+  };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
@@ -124,6 +230,11 @@ export default function Profile() {
     e.preventDefault();
     if (!user) return;
     
+    if (formData.phone && !validatePhone(formData.phone)) {
+      setError('Please enter a valid 10-digit phone number.');
+      return;
+    }
+
     setLoading(true);
     setError('');
     setSuccess(false);
@@ -164,19 +275,21 @@ export default function Profile() {
     e.preventDefault();
     if (!user) return;
     
+    setPasswordError('');
+    setPasswordSuccess(false);
+
     if (newPassword !== confirmPassword) {
       setPasswordError('Passwords do not match');
       return;
     }
 
-    if (newPassword.length < 6) {
-      setPasswordError('Password must be at least 6 characters');
+    const validation = validatePassword(newPassword);
+    if (!validation.isValid) {
+      setPasswordError(validation.message);
       return;
     }
 
     setPasswordLoading(true);
-    setPasswordError('');
-    setPasswordSuccess(false);
 
     try {
       const { error: updateError } = await supabase.auth.updateUser({
@@ -343,6 +456,72 @@ export default function Profile() {
               </form>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Documents Section */}
+      <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+        <div className="bg-slate-800 px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-[#FFB612]" />
+            <h2 className="text-lg font-medium text-white">Documents & Verification</h2>
+          </div>
+          <label className="cursor-pointer inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-bold rounded-md text-slate-800 bg-[#FFB612] hover:bg-[#e5a410] transition-colors">
+            <Upload className="h-3.5 w-3.5 mr-1.5" />
+            Upload Document
+            <input type="file" className="hidden" onChange={handleDocumentUpload} disabled={docUploading} />
+          </label>
+        </div>
+        
+        <div className="p-6">
+          {docUploading && (
+            <div className="flex items-center justify-center py-4 text-slate-500">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" />
+              <span className="text-sm font-medium">Uploading document...</span>
+            </div>
+          )}
+
+          {!docUploading && documents.length === 0 ? (
+            <div className="text-center py-8 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+              <FileText className="h-10 w-10 text-slate-300 mx-auto mb-2" />
+              <p className="text-sm text-slate-500 font-medium">No documents uploaded yet.</p>
+              <p className="text-xs text-slate-400 mt-1">Upload ID or proof of address for verification.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {documents.map((doc) => (
+                <div key={doc.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 group">
+                  <div className="flex items-center gap-3 overflow-hidden">
+                    <div className="h-10 w-10 bg-white rounded-lg flex items-center justify-center border border-slate-200 flex-shrink-0">
+                      <FileText className="h-5 w-5 text-slate-400" />
+                    </div>
+                    <div className="overflow-hidden">
+                      <p className="text-sm font-bold text-slate-900 truncate">{doc.file_name}</p>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                        {new Date(doc.created_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button 
+                      onClick={() => handleDownloadDocument(doc.file_path)}
+                      className="p-2 text-slate-400 hover:text-[#007856] transition-colors"
+                      title="Download"
+                    >
+                      <Download className="h-4 w-4" />
+                    </button>
+                    <button 
+                      onClick={() => handleDeleteDocument(doc)}
+                      className="p-2 text-slate-400 hover:text-red-600 transition-colors"
+                      title="Delete"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

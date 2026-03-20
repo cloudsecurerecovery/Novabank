@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Building2, Lock, Mail, User, Phone } from 'lucide-react';
+import { Building2, Lock, Mail, User, Phone, CheckCircle2, XCircle } from 'lucide-react';
 import { supabase, SUPABASE_URL } from '../supabaseClient';
+import { validateEmail, validatePassword, validatePhone, validateFullName } from '../utils/validation';
 
 export default function Register() {
   const [formData, setFormData] = useState({
@@ -17,6 +18,29 @@ export default function Register() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    // Enhanced Validation
+    if (!validateFullName(formData.name)) {
+      setError('Please enter your first and last name.');
+      return;
+    }
+
+    if (!validateEmail(formData.email)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+
+    if (formData.phone && !validatePhone(formData.phone)) {
+      setError('Please enter a valid 10-digit phone number.');
+      return;
+    }
+
+    const passwordCheck = validatePassword(formData.password);
+    if (!passwordCheck.isValid) {
+      setError(passwordCheck.message);
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -58,6 +82,8 @@ export default function Register() {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
+  const passwordStrength = validatePassword(formData.password);
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
@@ -81,8 +107,9 @@ export default function Register() {
         <div className="bg-white py-8 px-4 shadow-xl shadow-slate-200/50 sm:rounded-2xl sm:px-10 border border-slate-100">
           <form className="space-y-6" onSubmit={handleSubmit}>
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm">
-                {error}
+              <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm flex items-start gap-2">
+                <XCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                <span>{error}</span>
               </div>
             )}
             
@@ -104,6 +131,9 @@ export default function Register() {
                   placeholder="John Doe"
                 />
               </div>
+              {formData.name && !validateFullName(formData.name) && (
+                <p className="mt-1 text-xs text-red-500">Please enter at least two names.</p>
+              )}
             </div>
 
             <div>
@@ -124,6 +154,9 @@ export default function Register() {
                   placeholder="you@example.com"
                 />
               </div>
+              {formData.email && !validateEmail(formData.email) && (
+                <p className="mt-1 text-xs text-red-500">Please enter a valid email address.</p>
+              )}
             </div>
 
             <div>
@@ -143,6 +176,9 @@ export default function Register() {
                   placeholder="+1 (555) 000-0000"
                 />
               </div>
+              {formData.phone && !validatePhone(formData.phone) && (
+                <p className="mt-1 text-xs text-red-500">Please enter a valid 10-digit phone number.</p>
+              )}
             </div>
 
             <div>
@@ -157,13 +193,32 @@ export default function Register() {
                   type="password"
                   name="password"
                   required
-                  minLength={6}
                   value={formData.password}
                   onChange={handleChange}
                   className="focus:ring-[#007856] focus:border-[#007856] block w-full pl-10 sm:text-sm border-slate-300 rounded-lg py-2.5 border"
                   placeholder="••••••••"
                 />
               </div>
+              {formData.password && (
+                <div className="mt-2 space-y-1">
+                  <p className={`text-xs flex items-center gap-1 ${formData.password.length >= 8 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                    {formData.password.length >= 8 ? <CheckCircle2 className="w-3 h-3" /> : <div className="w-3 h-3 border border-slate-300 rounded-full" />}
+                    At least 8 characters
+                  </p>
+                  <p className={`text-xs flex items-center gap-1 ${/[A-Z]/.test(formData.password) ? 'text-emerald-600' : 'text-slate-400'}`}>
+                    {/[A-Z]/.test(formData.password) ? <CheckCircle2 className="w-3 h-3" /> : <div className="w-3 h-3 border border-slate-300 rounded-full" />}
+                    One uppercase letter
+                  </p>
+                  <p className={`text-xs flex items-center gap-1 ${/[0-9]/.test(formData.password) ? 'text-emerald-600' : 'text-slate-400'}`}>
+                    {/[0-9]/.test(formData.password) ? <CheckCircle2 className="w-3 h-3" /> : <div className="w-3 h-3 border border-slate-300 rounded-full" />}
+                    One number
+                  </p>
+                  <p className={`text-xs flex items-center gap-1 ${/[!@#$%^&*(),.?":{}|<>]/.test(formData.password) ? 'text-emerald-600' : 'text-slate-400'}`}>
+                    {/[!@#$%^&*(),.?":{}|<>]/.test(formData.password) ? <CheckCircle2 className="w-3 h-3" /> : <div className="w-3 h-3 border border-slate-300 rounded-full" />}
+                    One special character
+                  </p>
+                </div>
+              )}
             </div>
 
             <div>

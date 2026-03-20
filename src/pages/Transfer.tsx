@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { supabase } from '../supabaseClient';
-import { ArrowRight, CheckCircle2, AlertCircle, Building2, User, DollarSign, Text, ShieldCheck, History, Search, ArrowLeft, Loader2, Mail, Upload, Globe, Plus, Bell, Send } from 'lucide-react';
+import { ArrowRight, CheckCircle2, AlertCircle, Building2, User, DollarSign, Text, ShieldCheck, History, Search, ArrowLeft, Loader2, Mail, Upload, Globe, Plus, Bell, Send, XCircle } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { auditService } from '../services/auditService';
 import { notificationService } from '../services/notificationService';
+import { storageService } from '../services/storageService';
+import { validateEmail, validateAmount, validateRoutingNumber, validateAccountNumber } from '../utils/validation';
 
 interface RecentRecipient {
   id: string;
@@ -122,14 +124,14 @@ export default function Transfer() {
   const validateStep = async () => {
     setError('');
     
-    if (!amount || parseFloat(amount) <= 0) {
-      setError('Please enter a valid amount.');
+    if (!validateAmount(amount)) {
+      setError('Please enter a valid positive amount.');
       return;
     }
 
     if (transferType === 'standard') {
-      if (!receiverEmail) {
-        setError('Please enter a recipient email.');
+      if (!validateEmail(receiverEmail)) {
+        setError('Please enter a valid recipient email address.');
         return;
       }
       
@@ -169,6 +171,14 @@ export default function Transfer() {
     } else if (transferType === 'wire') {
       if (!beneficiaryName || !accountNumber || !routingNumber || !bankName) {
         setError('Please fill in all required beneficiary and bank details.');
+        return;
+      }
+      if (!validateRoutingNumber(routingNumber)) {
+        setError('Routing number must be exactly 9 digits.');
+        return;
+      }
+      if (!validateAccountNumber(accountNumber)) {
+        setError('Account number must be between 8 and 17 digits.');
         return;
       }
       if (wireType === 'international' && !swiftCode) {
@@ -215,17 +225,32 @@ export default function Transfer() {
         await notificationService.notify(receiverData.id, 'transfer_received', `Received $${txAmount.toLocaleString()} from ${user?.email}`);
       } 
       else if (transferType === 'deposit') {
-        const { error: txError } = await supabase.from('transactions').insert({
+        let frontPath = '';
+        let backPath = '';
+
+        const { data: txData, error: txError } = await supabase.from('transactions').insert({
           user_id: user?.id,
           amount: txAmount,
           status: 'pending',
           description: `Mobile Deposit - ${depositMethod === 'check' ? 'Check' : 'ACH'}`,
           created_at: new Date().toISOString()
-        });
+        }).select().single();
 
         if (txError) throw txError;
 
-        await auditService.log(user?.id!, 'deposit', { amount: txAmount, method: depositMethod });
+        if (depositMethod === 'check' && checkFront && checkBack && txData) {
+          const txId = txData.id;
+          frontPath = await storageService.uploadFile(user?.id!, 'deposits', txId, checkFront);
+          backPath = await storageService.uploadFile(user?.id!, 'deposits', txId, checkBack);
+
+          // Store document metadata linked to transaction
+          await supabase.from('user_documents').insert([
+            { user_id: user?.id, transaction_id: txId, file_name: 'Check Front', file_path: frontPath, file_type: 'check_deposit' },
+            { user_id: user?.id, transaction_id: txId, file_name: 'Check Back', file_path: backPath, file_type: 'check_deposit' }
+          ]);
+        }
+
+        await auditService.log(user?.id!, 'deposit', { amount: txAmount, method: depositMethod, frontPath, backPath, transaction_id: txData?.id });
         await notificationService.notify(user?.id!, 'deposit', `Deposit of $${txAmount.toLocaleString()} is pending review.`);
       }
       else if (transferType === 'wire') {

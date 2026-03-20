@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { supabase } from '../../supabaseClient';
 import { Send, UserCircle, MessageSquare, Search, ShieldCheck, Clock } from 'lucide-react';
@@ -23,8 +24,9 @@ interface User {
 
 export default function AdminChat() {
   const { user } = useAuthStore();
+  const [searchParams] = useSearchParams();
   const [users, setUsers] = useState<User[]>([]);
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(searchParams.get('user'));
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);

@@ -2,7 +2,7 @@ import { useState, useEffect, Fragment } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { supabase } from '../supabaseClient';
 import { format, subDays, startOfDay } from 'date-fns';
-import { ArrowUpRight, ArrowDownLeft, Clock, CheckCircle2, AlertCircle, AlertTriangle, X, ChevronDown, ChevronUp, Info, Send, ShieldCheck, PieChart, CreditCard, Building2, MessageSquare, UserCircle, Globe, Upload } from 'lucide-react';
+import { ArrowUpRight, ArrowDownLeft, Clock, CheckCircle2, AlertCircle, AlertTriangle, X, ChevronDown, ChevronUp, Info, Send, ShieldCheck, PieChart, CreditCard, Building2, MessageSquare, UserCircle, Globe, Upload, Download } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
@@ -13,6 +13,11 @@ interface Transaction {
   status: 'pending' | 'hold' | 'released' | 'reversible';
   description: string;
   created_at: string;
+  user_documents?: {
+    id: string;
+    file_path: string;
+    file_name: string;
+  }[];
 }
 
 interface AdminNote {
@@ -29,16 +34,24 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [expandedTxId, setExpandedTxId] = useState<string | null>(null);
   const [chartData, setChartData] = useState<any[]>([]);
+  const [checkImages, setCheckImages] = useState<Record<string, string>>({});
+  const [copySuccess, setCopySuccess] = useState<string | null>(null);
 
   const toggleExpand = (txId: string) => {
     setExpandedTxId(expandedTxId === txId ? null : txId);
+  };
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopySuccess(id);
+    setTimeout(() => setCopySuccess(null), 2000);
   };
 
   const dismissNote = async (noteId: string) => {
     try {
       const { error } = await supabase
         .from('admin_notes')
-        .delete()
+        .update({ is_read: true })
         .eq('id', noteId);
       
       if (error) throw error;
@@ -54,10 +67,13 @@ export default function Dashboard() {
       if (!user) return;
       
       try {
-        // Fetch transactions
+        // Fetch transactions with documents
         const { data: txData, error: txError } = await supabase
           .from('transactions')
-          .select('*')
+          .select(`
+            *,
+            user_documents:user_documents(id, file_path, file_name)
+          `)
           .eq('user_id', user.id)
           .order('created_at', { ascending: false });
 
@@ -103,6 +119,7 @@ export default function Dashboard() {
           .from('admin_notes')
           .select('*')
           .eq('user_id', user.id)
+          .eq('is_read', false)
           .order('created_at', { ascending: false });
 
         if (notesError) throw notesError;
@@ -150,6 +167,32 @@ export default function Dashboard() {
       notesSubscription.unsubscribe();
     };
   }, [user]);
+
+  useEffect(() => {
+    const loadCheckImages = async () => {
+      if (!expandedTxId) return;
+      const tx = transactions.find(t => t.id === expandedTxId);
+      if (!tx?.user_documents?.length) return;
+
+      const { storageService } = await import('../services/storageService');
+      const urls: Record<string, string> = {};
+      
+      for (const doc of tx.user_documents) {
+        if (checkImages[doc.id]) continue; // Skip if already loaded
+        try {
+          const url = await storageService.getSignedUrl(doc.file_path);
+          urls[doc.id] = url;
+        } catch (e) {
+          console.error('Failed to get signed URL', e);
+        }
+      }
+      if (Object.keys(urls).length > 0) {
+        setCheckImages(prev => ({ ...prev, ...urls }));
+      }
+    };
+
+    loadCheckImages();
+  }, [expandedTxId, transactions]);
 
   if (loading) {
     return (
@@ -204,8 +247,11 @@ export default function Dashboard() {
               <div key={note.id} className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-md flex items-start justify-between shadow-sm">
                 <div className="flex items-start">
                   <AlertTriangle className="h-5 w-5 text-amber-500 mr-3 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <h3 className="text-sm font-medium text-amber-800">Important Notification</h3>
+                  <div className="flex-1">
+                    <div className="flex justify-between items-start">
+                      <h3 className="text-sm font-medium text-amber-800">Important Notification</h3>
+                      <Link to="/notifications" className="text-[10px] font-bold text-amber-600 hover:underline uppercase tracking-wider">View All</Link>
+                    </div>
                     <p className="text-sm text-amber-700 mt-1">{note.message}</p>
                     <p className="text-xs text-amber-600 mt-2">{format(new Date(note.created_at), 'MMM d, yyyy h:mm a')}</p>
                   </div>
@@ -356,23 +402,86 @@ export default function Dashboard() {
                                   className="overflow-hidden bg-slate-50/50"
                                 >
                                   <div className="px-6 py-4 border-t border-slate-100">
-                                    <div className="flex flex-col space-y-3">
+                                    <div className="flex flex-col space-y-4">
                                       <div className="flex items-start gap-3">
-                                        <Info className="w-5 h-5 text-slate-400 mt-0.5" />
-                                        <div>
-                                          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Transaction Details</p>
-                                          <p className="text-sm text-slate-700 mt-1 leading-relaxed">{tx.description}</p>
+                                        <div className="bg-slate-100 p-2 rounded-lg">
+                                          <Info className="w-4 h-4 text-slate-500" />
+                                        </div>
+                                        <div className="flex-1">
+                                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Transaction Description</p>
+                                          <p className="text-sm text-slate-700 mt-1 font-medium leading-relaxed">{tx.description}</p>
                                         </div>
                                       </div>
-                                      <div className="grid grid-cols-2 gap-6 pt-4 border-t border-slate-200/50">
+
+                                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 py-4 border-y border-slate-100">
                                         <div>
-                                          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Reference ID</p>
-                                          <p className="text-xs text-slate-500 font-mono mt-1 break-all">{tx.id}</p>
+                                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Reference ID</p>
+                                          <div className="flex items-center gap-2 mt-1">
+                                            <p className="text-xs text-slate-600 font-mono break-all">{tx.id}</p>
+                                            <button 
+                                              onClick={() => copyToClipboard(tx.id, tx.id)}
+                                              className="text-[10px] font-bold text-[#007856] hover:underline"
+                                            >
+                                              {copySuccess === tx.id ? 'Copied!' : 'Copy'}
+                                            </button>
+                                          </div>
                                         </div>
                                         <div>
-                                          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Processed On</p>
-                                          <p className="text-xs text-slate-500 mt-1">{format(new Date(tx.created_at), 'MMMM d, yyyy h:mm:ss a')}</p>
+                                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Processed On</p>
+                                          <p className="text-xs text-slate-600 font-medium mt-1">
+                                            {format(new Date(tx.created_at), 'MMMM d, yyyy h:mm:ss a')}
+                                          </p>
                                         </div>
+                                        <div>
+                                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Transaction Type</p>
+                                          <p className="text-xs font-bold mt-1">
+                                            {Number(tx.amount) >= 0 ? (
+                                              <span className="text-emerald-600">Credit / Deposit</span>
+                                            ) : (
+                                              <span className="text-slate-700">Debit / Payment</span>
+                                            )}
+                                          </p>
+                                        </div>
+                                      </div>
+
+                                      {tx.user_documents && tx.user_documents.length > 0 && (
+                                        <div className="space-y-3">
+                                          <div className="flex items-center gap-2 text-slate-400">
+                                            <Upload className="w-3.5 h-3.5" />
+                                            <h4 className="text-[10px] font-bold uppercase tracking-widest">Attached Documents</h4>
+                                          </div>
+                                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                            {tx.user_documents.map(doc => (
+                                              <div key={doc.id} className="space-y-1">
+                                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest truncate">{doc.file_name}</p>
+                                                {checkImages[doc.id] ? (
+                                                  <a href={checkImages[doc.id]} target="_blank" rel="noreferrer" className="block relative group overflow-hidden rounded-lg border border-slate-200">
+                                                    <img 
+                                                      src={checkImages[doc.id]} 
+                                                      alt={doc.file_name} 
+                                                      className="w-full h-20 object-cover transition-transform group-hover:scale-110"
+                                                      referrerPolicy="no-referrer"
+                                                    />
+                                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                      <Download className="w-4 h-4 text-white" />
+                                                    </div>
+                                                  </a>
+                                                ) : (
+                                                  <div className="w-full h-20 bg-slate-100 rounded-lg animate-pulse" />
+                                                )}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      <div className="flex justify-end gap-3 pt-2">
+                                        <button className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-50 transition-all">
+                                          Download Receipt
+                                        </button>
+                                        <Link to="/support" className="px-4 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-200 transition-all">
+                                          Report Issue
+                                        </Link>
                                       </div>
                                     </div>
                                   </div>
