@@ -83,6 +83,7 @@ export default function Layout() {
       ]
     : [
         { name: 'Accounts', path: '/dashboard', icon: Building2 },
+        { name: 'Transactions', path: '/transactions', icon: Clock },
         { name: 'Cards', path: '/cards', icon: CreditCard },
         { name: 'Transfer', path: '/transfer', icon: DollarSign },
         { name: 'Deposit', path: '/deposit', icon: ArrowDownLeft },

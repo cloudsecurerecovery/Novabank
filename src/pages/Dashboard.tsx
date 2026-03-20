@@ -332,7 +332,7 @@ export default function Dashboard() {
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
               <h3 className="text-lg font-bold text-slate-900">Recent Activity</h3>
-              <button className="text-sm font-semibold text-[#007856] hover:underline">View All</button>
+              <Link to="/transactions" className="text-sm font-semibold text-[#007856] hover:underline">View All</Link>
             </div>
             
             {transactions.length === 0 ? (

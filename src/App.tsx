@@ -15,6 +15,8 @@ import Profile from './pages/Profile';
 import Cards from './pages/Cards';
 import Notifications from './pages/Notifications';
 import SupportChat from './pages/SupportChat';
+import Transactions from './pages/Transactions';
+import NotFound from './pages/NotFound';
 import Layout from './components/Layout';
 import { ProtectedRoute, AdminRoute } from './components/ProtectedRoute';
 import AdminUsers from './pages/admin/Users';
@@ -154,6 +156,7 @@ export default function App() {
             <Route path="/transfer" element={<Transfer />} />
             <Route path="/deposit" element={<Transfer />} />
             <Route path="/wire-transfer" element={<Transfer />} />
+            <Route path="/transactions" element={<Transactions />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/cards" element={<Cards />} />
             <Route path="/notifications" element={<Notifications />} />
@@ -172,6 +175,7 @@ export default function App() {
         </Route>
 
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>
   );
