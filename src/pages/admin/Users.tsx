@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
 import { supabase } from '../../supabaseClient';
 import { format } from 'date-fns';
 import { ShieldAlert, Plus, Users as UsersIcon, Search, MoreVertical, X, DollarSign, Bell, ShieldCheck, ArrowUpRight, ArrowDownLeft, Loader2, MessageSquare, UserCircle } from 'lucide-react';
@@ -12,12 +13,21 @@ interface User {
   email: string;
   phone?: string;
   is_admin: boolean;
+  role: string;
   created_at: string;
   balance?: number;
   avatar_url?: string;
   otp_code?: string;
   otp_expires_at?: string;
 }
+
+const ROLES = [
+  { value: 'user', label: 'Customer' },
+  { value: 'admin', label: 'Administrator' },
+  { value: 'support', label: 'Customer Support' },
+  { value: 'manager', label: 'Manager' },
+  { value: 'analyst', label: 'Analyst' }
+];
 
 export default function AdminUsers() {
   const [users, setUsers] = useState<User[]>([]);
@@ -37,6 +47,7 @@ export default function AdminUsers() {
   const [editEmail, setEditEmail] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editIsAdmin, setEditIsAdmin] = useState(false);
+  const [editRole, setEditRole] = useState('user');
 
   const [historyAmount, setHistoryAmount] = useState('');
   const [historyStatus, setHistoryStatus] = useState<'pending' | 'hold' | 'released' | 'reversible'>('released');
@@ -73,7 +84,7 @@ export default function AdminUsers() {
     try {
       const amount = parseFloat(fundAmount);
       if (isNaN(amount) || amount <= 0) {
-        alert('Please enter a valid amount greater than 0.');
+        toast.error('Please enter a valid amount greater than 0.');
         return;
       }
 
@@ -127,9 +138,10 @@ export default function AdminUsers() {
       });
 
       setNotificationMsg('');
-      alert('Notification sent successfully.');
+      toast.success('Notification sent successfully.');
     } catch (err) {
       console.error('Failed to send notification:', err);
+      toast.error('Failed to send notification');
     } finally {
       setActionLoading(false);
     }
@@ -143,7 +155,7 @@ export default function AdminUsers() {
     try {
       const amount = parseFloat(bulkAmount);
       if (isNaN(amount) || amount <= 0) {
-        alert('Please enter a valid amount.');
+        toast.error('Please enter a valid amount.');
         return;
       }
 
@@ -166,10 +178,10 @@ export default function AdminUsers() {
       setBulkAmount('');
       setIsBulkModalOpen(false);
       await fetchUsers();
-      alert(`Successfully added $${amount} to all ${users.length} users.`);
+      toast.success(`Successfully added $${amount} to all ${users.length} users.`);
     } catch (err: any) {
       console.error('Failed bulk deposit:', err);
-      alert('Bulk deposit failed: ' + err.message);
+      toast.error('Bulk deposit failed: ' + err.message);
     } finally {
       setActionLoading(false);
     }
@@ -187,7 +199,8 @@ export default function AdminUsers() {
           full_name: editFullName,
           email: editEmail,
           phone: editPhone,
-          is_admin: editIsAdmin
+          is_admin: editIsAdmin,
+          role: editRole
         })
         .eq('id', selectedUser.id);
 
@@ -200,13 +213,15 @@ export default function AdminUsers() {
         email: editEmail,
         phone: editPhone,
         is_admin: editIsAdmin,
+        role: editRole,
         admin_id: (await supabase.auth.getUser()).data.user?.id
       });
 
       await fetchUsers();
-      alert('User profile updated successfully.');
+      toast.success('User profile updated successfully.');
     } catch (err) {
       console.error('Failed to update profile:', err);
+      toast.error('Failed to update profile');
     } finally {
       setActionLoading(false);
     }
@@ -218,7 +233,7 @@ export default function AdminUsers() {
     setActionLoading(true);
     try {
       const { data: code, error } = await supabase
-        .rpc('generate_otp', { target_user_id: selectedUser.id });
+        .rpc('public.generate_otp', { target_user_id: selectedUser.id });
 
       if (error) throw error;
 
@@ -228,9 +243,10 @@ export default function AdminUsers() {
         admin_id: (await supabase.auth.getUser()).data.user?.id
       });
 
-      alert(`OTP sent to user: ${code}`);
+      toast.success(`OTP generated for ${selectedUser.full_name}: ${code}`);
     } catch (err) {
       console.error('Failed to send OTP:', err);
+      toast.error('Failed to generate OTP');
     } finally {
       setActionLoading(false);
     }
@@ -244,7 +260,7 @@ export default function AdminUsers() {
     try {
       let amount = parseFloat(historyAmount);
       if (isNaN(amount)) {
-        alert('Please enter a valid amount.');
+        toast.error('Please enter a valid amount.');
         return;
       }
 
@@ -278,9 +294,10 @@ export default function AdminUsers() {
       setHistoryDescription('');
       setHistoryDate(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
       await fetchUsers();
-      alert('Transaction record added successfully.');
+      toast.success('Transaction record added successfully.');
     } catch (err) {
       console.error('Failed to set history:', err);
+      toast.error('Failed to add transaction record');
     } finally {
       setActionLoading(false);
     }
@@ -400,7 +417,7 @@ export default function AdminUsers() {
             <thead>
               <tr className="bg-slate-50/50">
                 <th className="px-8 py-4 text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest">Customer</th>
-                <th className="px-8 py-4 text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
+                <th className="px-8 py-4 text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest">Role</th>
                 <th className="px-8 py-4 text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest">Balance</th>
                 <th className="px-8 py-4 text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest">Joined</th>
                 <th className="px-8 py-4 text-right text-[10px] font-bold text-slate-400 uppercase tracking-widest">Actions</th>
@@ -432,7 +449,7 @@ export default function AdminUsers() {
                     <span className={`inline-flex items-center px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${
                       u.is_admin ? 'bg-indigo-50 text-indigo-600 border border-indigo-100' : 'bg-emerald-50 text-emerald-600 border border-emerald-100'
                     }`}>
-                      {u.is_admin ? 'Admin' : 'Customer'}
+                      {ROLES.find(r => r.value === u.role)?.label || u.role || (u.is_admin ? 'Admin' : 'Customer')}
                     </span>
                   </td>
                   <td className="px-8 py-5 whitespace-nowrap">
@@ -453,6 +470,7 @@ export default function AdminUsers() {
                         setEditEmail(u.email || '');
                         setEditPhone(u.phone || '');
                         setEditIsAdmin(u.is_admin || false);
+                        setEditRole(u.role || (u.is_admin ? 'admin' : 'user'));
                         setIsPanelOpen(true);
                       }}
                       className="p-2 rounded-xl hover:bg-white hover:shadow-md transition-all text-[#007856]"
@@ -516,8 +534,10 @@ export default function AdminUsers() {
                       <p className="text-lg font-bold text-[#007856]">${(selectedUser.balance || 0).toLocaleString()}</p>
                     </div>
                     <div className="bg-white p-4 rounded-2xl border border-slate-100">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Status</p>
-                      <p className="text-sm font-bold text-slate-700">{selectedUser.is_admin ? 'Admin' : 'Customer'}</p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Role</p>
+                      <p className="text-sm font-bold text-slate-700">
+                        {ROLES.find(r => r.value === selectedUser.role)?.label || selectedUser.role || (selectedUser.is_admin ? 'Admin' : 'Customer')}
+                      </p>
                     </div>
                   </div>
                   <div className="mt-4">
@@ -569,6 +589,27 @@ export default function AdminUsers() {
                             onChange={(e) => setEditPhone(e.target.value)}
                             className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-slate-900 focus:ring-2 focus:ring-slate-200 transition-all font-medium"
                           />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 ml-2">Assigned Role</label>
+                          <select
+                            value={editRole}
+                            onChange={(e) => {
+                              const newRole = e.target.value;
+                              setEditRole(newRole);
+                              // Automatically set is_admin if role is not 'user'
+                              if (newRole !== 'user') {
+                                setEditIsAdmin(true);
+                              } else {
+                                setEditIsAdmin(false);
+                              }
+                            }}
+                            className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-slate-900 focus:ring-2 focus:ring-slate-200 transition-all font-medium"
+                          >
+                            {ROLES.map(role => (
+                              <option key={role.value} value={role.value}>{role.label}</option>
+                            ))}
+                          </select>
                         </div>
                         <div className="flex items-center gap-3 px-4 py-3 bg-slate-50 rounded-2xl">
                           <input

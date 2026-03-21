@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../supabaseClient';
+import { Link } from 'react-router-dom';
 import { 
   Users, 
   DollarSign, 
@@ -41,13 +42,12 @@ export default function AdminDashboard() {
         .from('profiles')
         .select('*', { count: 'exact', head: true });
 
-      // 2. Total Balance (Released Transactions)
-      const { data: txs } = await supabase
-        .from('transactions')
-        .select('amount, status, created_at')
-        .eq('status', 'released');
+      // 2. Total System Liquidity (Sum of all user balances)
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('balance');
 
-      const totalBalance = txs?.reduce((sum, tx) => sum + Number(tx.amount), 0) || 0;
+      const totalBalance = profiles?.reduce((sum, p) => sum + Number(p.balance || 0), 0) || 0;
 
       // 3. Transactions Today
       const today = startOfDay(new Date()).toISOString();
@@ -72,6 +72,11 @@ export default function AdminDashboard() {
         activeChats
       });
 
+      const { data: txsForChart } = await supabase
+        .from('transactions')
+        .select('amount, status, created_at')
+        .eq('status', 'released');
+
       // 5. Chart Data (Last 7 Days)
       const last7Days = Array.from({ length: 7 }, (_, i) => {
         const date = subDays(new Date(), i);
@@ -83,9 +88,9 @@ export default function AdminDashboard() {
         };
       }).reverse();
 
-      if (txs) {
+      if (txsForChart) {
         const historyData = last7Days.map(day => {
-          const dayTxs = txs.filter(tx => 
+          const dayTxs = txsForChart.filter(tx => 
             startOfDay(new Date(tx.created_at)).getTime() === day.fullDate.getTime()
           );
           return {
@@ -281,9 +286,12 @@ export default function AdminDashboard() {
               </div>
             )}
           </div>
-          <button className="w-full mt-8 py-3 bg-slate-50 text-slate-600 font-bold text-xs rounded-2xl hover:bg-slate-100 transition-all uppercase tracking-widest">
+          <Link 
+            to="/admin/transactions"
+            className="w-full mt-8 py-3 bg-slate-50 text-slate-600 font-bold text-xs rounded-2xl hover:bg-slate-100 transition-all uppercase tracking-widest block text-center"
+          >
             View All Transactions
-          </button>
+          </Link>
         </div>
       </div>
     </div>

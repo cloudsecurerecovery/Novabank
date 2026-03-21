@@ -90,7 +90,7 @@ export default function SupportChat() {
       const { data: adminData } = await supabase
         .from('profiles')
         .select('id')
-        .eq('is_admin', true)
+        .eq('role', 'admin')
         .limit(1)
         .single();
 

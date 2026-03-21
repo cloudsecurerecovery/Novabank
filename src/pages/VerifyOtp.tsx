@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
 import { supabase } from '../supabaseClient';
 import { useAuthStore } from '../store/authStore';
 import { motion } from 'framer-motion';
@@ -21,15 +22,16 @@ export default function VerifyOtp() {
     setError('');
     try {
       const { data: code, error: rpcError } = await supabase
-        .rpc('generate_otp', { target_user_id: user.id });
+        .rpc('public.generate_otp', { target_user_id: user.id });
 
       if (rpcError) throw rpcError;
 
       // SIMULATION: In a real app, you'd call an edge function or email service here.
       console.log(`[OTP SIMULATION] Code for ${user.email}: ${code}`);
-      setSuccess('A verification code has been sent to your email.');
+      toast.success('Verification code sent to your email');
     } catch (err: any) {
       setError(err.message || 'Failed to send OTP');
+      toast.error('Failed to send verification code');
     } finally {
       setSending(false);
     }
@@ -49,7 +51,7 @@ export default function VerifyOtp() {
     setError('');
     try {
       const { data: isValid, error: rpcError } = await supabase
-        .rpc('verify_otp', { target_user_id: user.id, input_otp: otp });
+        .rpc('public.verify_otp', { target_user_id: user.id, input_otp: otp });
 
       if (rpcError) throw rpcError;
 

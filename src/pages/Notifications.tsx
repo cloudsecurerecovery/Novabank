@@ -18,6 +18,7 @@ export default function Notifications() {
   const { user } = useAuthStore();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   const fetchAllNotifications = async () => {
     if (!user) return;
@@ -155,8 +156,7 @@ export default function Notifications() {
 
   const clearAll = async () => {
     if (!user || notifications.length === 0) return;
-    if (!confirm('Are you sure you want to clear all notifications?')) return;
-
+    
     try {
       await supabase
         .from('admin_notes')
@@ -169,6 +169,7 @@ export default function Notifications() {
         .eq('user_id', user.id);
 
       setNotifications([]);
+      setShowClearConfirm(false);
     } catch (error) {
       console.error('Error clearing notifications:', error);
     }
@@ -202,13 +203,43 @@ export default function Notifications() {
             </button>
           )}
           {notifications.length > 0 && (
-            <button
-              onClick={clearAll}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-red-600 hover:bg-red-50 rounded-xl transition-colors"
-            >
-              <Trash2 className="w-4 h-4" />
-              Clear All
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => setShowClearConfirm(!showClearConfirm)}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+                Clear All
+              </button>
+              
+              <AnimatePresence>
+                {showClearConfirm && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-100 p-4 z-20"
+                  >
+                    <p className="text-sm font-bold text-slate-900 mb-3">Clear all notifications?</p>
+                    <p className="text-xs text-slate-500 mb-4 leading-relaxed">This action cannot be undone. All messages and alerts will be permanently deleted.</p>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={clearAll}
+                        className="flex-1 py-2 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-colors"
+                      >
+                        Yes, Clear
+                      </button>
+                      <button 
+                        onClick={() => setShowClearConfirm(false)}
+                        className="flex-1 py-2 bg-slate-100 text-slate-600 text-xs font-bold rounded-lg hover:bg-slate-200 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           )}
         </div>
       </div>

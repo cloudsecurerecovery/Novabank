@@ -5,6 +5,7 @@ export interface User {
   full_name: string;
   email: string;
   is_admin: boolean;
+  role?: string;
   avatar_url?: string;
   phone?: string;
   otp_code?: string;

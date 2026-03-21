@@ -89,6 +89,7 @@ export default function App() {
           full_name: data.full_name || email.split('@')[0],
           email: email,
           is_admin: data.is_admin,
+          role: data.role,
           avatar_url: signedAvatarUrl,
           phone: data.phone,
           balance: data.balance || 0,

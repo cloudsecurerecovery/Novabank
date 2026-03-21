@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../supabaseClient';
 import { format } from 'date-fns';
+import { toast } from 'react-hot-toast';
 import { 
   FileText, 
   ChevronDown, 
@@ -132,10 +133,11 @@ export default function AdminTransactions() {
         admin_id: (await supabase.auth.getUser()).data.user?.id
       });
 
+      toast.success(`Transaction ${targetStatus}`);
       await fetchTransactions();
     } catch (err) {
       console.error('Failed to update status:', err);
-      alert('Failed to update status');
+      toast.error('Failed to update status');
     } finally {
       setActionLoading(null);
     }
@@ -164,10 +166,11 @@ export default function AdminTransactions() {
 
       setNoticeMessage('');
       setNoticeSuccess(txId);
+      toast.success('Notice sent successfully');
       setTimeout(() => setNoticeSuccess(null), 3000);
     } catch (err) {
       console.error('Failed to send notice:', err);
-      alert('Failed to send notice');
+      toast.error('Failed to send notice');
     } finally {
       setNoticeLoading(null);
     }
@@ -203,13 +206,14 @@ export default function AdminTransactions() {
 
       setBulkNoticeSuccess(true);
       setBulkNoticeMessage('');
+      toast.success('Bulk notices sent successfully');
       setTimeout(() => {
         setBulkNoticeSuccess(false);
         setIsBulkNoticeOpen(false);
       }, 3000);
     } catch (err) {
       console.error('Failed to send bulk notices:', err);
-      alert('Failed to send some notices. Please check logs.');
+      toast.error('Failed to send some notices. Please check logs.');
     } finally {
       setBulkNoticeLoading(false);
     }

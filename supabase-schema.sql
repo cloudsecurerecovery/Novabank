@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   avatar_url TEXT,
   balance NUMERIC DEFAULT 0,
   is_admin BOOLEAN DEFAULT FALSE,
+  role TEXT DEFAULT 'user',
   otp_code TEXT,
   otp_expires_at TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()),
@@ -166,14 +167,14 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- B. OTP Generation RPC
 -- Generates a 6-digit OTP and stores it in the profile
-CREATE OR REPLACE FUNCTION generate_otp(target_user_id UUID)
+CREATE OR REPLACE FUNCTION public.generate_otp(target_user_id UUID)
 RETURNS TEXT AS $$
 DECLARE
   new_otp TEXT;
   is_admin_user BOOLEAN;
 BEGIN
   -- Security Check: Allow self or admin
-  SELECT is_admin INTO is_admin_user FROM profiles WHERE id = auth.uid();
+  SELECT is_admin INTO is_admin_user FROM public.profiles WHERE id = auth.uid();
   
   IF target_user_id != auth.uid() AND (is_admin_user IS NULL OR NOT is_admin_user) THEN
     RAISE EXCEPTION 'Unauthorized';
@@ -182,7 +183,7 @@ BEGIN
   -- Generate 6-digit code
   new_otp := LPAD(FLOOR(RANDOM() * 1000000)::TEXT, 6, '0');
   
-  UPDATE profiles
+  UPDATE public.profiles
   SET otp_code = new_otp,
       otp_expires_at = NOW() + INTERVAL '10 minutes'
   WHERE id = target_user_id;
@@ -193,7 +194,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- C. OTP Verification RPC
 -- Verifies the OTP and clears it upon success
-CREATE OR REPLACE FUNCTION verify_otp(target_user_id UUID, input_otp TEXT)
+CREATE OR REPLACE FUNCTION public.verify_otp(target_user_id UUID, input_otp TEXT)
 RETURNS BOOLEAN AS $$
 DECLARE
   stored_otp TEXT;
@@ -205,7 +206,7 @@ BEGIN
   END IF;
 
   SELECT otp_code, otp_expires_at INTO stored_otp, expires_at
-  FROM profiles
+  FROM public.profiles
   WHERE id = target_user_id;
 
   -- Validation
@@ -218,7 +219,7 @@ BEGIN
   END IF;
 
   -- Success: Clear OTP
-  UPDATE profiles
+  UPDATE public.profiles
   SET otp_code = NULL, otp_expires_at = NULL
   WHERE id = target_user_id;
 
@@ -231,14 +232,15 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger AS $$
 BEGIN
-  INSERT INTO public.profiles (id, full_name, email, phone, is_admin, balance)
+  INSERT INTO public.profiles (id, full_name, email, phone, is_admin, balance, role)
   VALUES (
     new.id, 
     COALESCE(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', ''), 
     new.email,
     COALESCE(new.raw_user_meta_data->>'phone', ''),
     FALSE,
-    0
+    0,
+    'user'
   );
   RETURN new;
 END;
