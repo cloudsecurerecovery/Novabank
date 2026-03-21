@@ -53,20 +53,7 @@ export default function AdminUsers() {
 
       if (profilesError) throw profilesError;
 
-      const { data: transactions, error: txError } = await supabase
-        .from('transactions')
-        .select('user_id, amount')
-        .eq('status', 'released');
-
-      if (txError) throw txError;
-
-      const usersWithBalances = profiles.map(profile => {
-        const userTxs = transactions.filter(tx => tx.user_id === profile.id);
-        const balance = userTxs.reduce((sum, tx) => sum + Number(tx.amount), 0);
-        return { ...profile, balance };
-      });
-
-      setUsers(usersWithBalances);
+      setUsers(profiles);
     } catch (err) {
       console.error('Failed to fetch users:', err);
     } finally {
@@ -110,8 +97,6 @@ export default function AdminUsers() {
 
       setFundAmount('');
       await fetchUsers();
-      // Update selected user balance locally too
-      setSelectedUser(prev => prev ? { ...prev, balance: (prev.balance || 0) + amount } : null);
     } catch (err) {
       console.error('Failed to add funds:', err);
     } finally {
@@ -293,10 +278,6 @@ export default function AdminUsers() {
       setHistoryDescription('');
       setHistoryDate(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
       await fetchUsers();
-      // Update selected user balance locally too if released
-      if (historyStatus === 'released') {
-        setSelectedUser(prev => prev ? { ...prev, balance: (prev.balance || 0) + amount } : null);
-      }
       alert('Transaction record added successfully.');
     } catch (err) {
       console.error('Failed to set history:', err);

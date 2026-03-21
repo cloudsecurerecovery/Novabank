@@ -19,7 +19,7 @@ type Step = 'details' | 'confirm' | 'success';
 type TransferType = 'standard' | 'deposit' | 'wire';
 
 export default function Transfer() {
-  const { user } = useAuthStore();
+  const { user, updateUser } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
   
@@ -42,7 +42,7 @@ export default function Transfer() {
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [balance, setBalance] = useState(0);
+  const [balance, setBalance] = useState(user?.balance || 0);
 
   // Standard Transfer State
   const [receiverEmail, setReceiverEmail] = useState('');
@@ -66,6 +66,21 @@ export default function Transfer() {
 
   const fetchBalance = useCallback(async () => {
     if (!user) return;
+    
+    // Fetch directly from profiles table for the most accurate balance
+    const { data: profileData, error: profileError } = await supabase
+      .from('profiles')
+      .select('balance')
+      .eq('id', user.id)
+      .single();
+
+    if (!profileError && profileData) {
+      setBalance(profileData.balance || 0);
+      updateUser({ balance: profileData.balance || 0 });
+      return;
+    }
+
+    // Fallback to transaction calculation if profile balance fails
     const { data, error } = await supabase
       .from('transactions')
       .select('amount')
@@ -75,8 +90,9 @@ export default function Transfer() {
     if (!error && data) {
       const calcBalance = data.reduce((sum, tx) => sum + Number(tx.amount), 0);
       setBalance(calcBalance);
+      updateUser({ balance: calcBalance });
     }
-  }, [user]);
+  }, [user, updateUser]);
 
   const fetchRecentRecipients = useCallback(async () => {
     if (!user) return;
@@ -203,7 +219,7 @@ export default function Transfer() {
       if (transferType === 'standard') {
         const { data: receiverData, error: receiverError } = await supabase
           .from('profiles')
-          .select('id')
+          .select('id, balance')
           .eq('email', receiverEmail.toLowerCase())
           .single();
 
@@ -221,8 +237,8 @@ export default function Transfer() {
 
         await auditService.log(user?.id!, 'transfer_sent', { amount: txAmount, to: receiverEmail });
         await auditService.log(receiverData.id, 'transfer_received', { amount: txAmount, from: user?.email });
-        await notificationService.notify(user?.id!, 'transfer_sent', `Sent $${txAmount.toLocaleString()} to ${receiverEmail}`);
-        await notificationService.notify(receiverData.id, 'transfer_received', `Received $${txAmount.toLocaleString()} from ${user?.email}`);
+        await notificationService.notify(user?.id!, 'transfer_sent', `Sent ${txAmount.toLocaleString()} to ${receiverEmail}`);
+        await notificationService.notify(receiverData.id, 'transfer_received', `Received ${txAmount.toLocaleString()} from ${user?.email}`);
       } 
       else if (transferType === 'deposit') {
         let frontPath = '';
@@ -251,7 +267,7 @@ export default function Transfer() {
         }
 
         await auditService.log(user?.id!, 'deposit', { amount: txAmount, method: depositMethod, frontPath, backPath, transaction_id: txData?.id });
-        await notificationService.notify(user?.id!, 'deposit', `Deposit of $${txAmount.toLocaleString()} is pending review.`);
+        await notificationService.notify(user?.id!, 'deposit', `Deposit of ${txAmount.toLocaleString()} is pending review.`);
       }
       else if (transferType === 'wire') {
         const { error: txError } = await supabase.from('transactions').insert({
@@ -265,7 +281,7 @@ export default function Transfer() {
         if (txError) throw txError;
 
         await auditService.log(user?.id!, 'wire_transfer', { amount: txAmount, to: beneficiaryName, type: wireType });
-        await notificationService.notify(user?.id!, 'wire_transfer', `Wire transfer of $${txAmount.toLocaleString()} to ${beneficiaryName} initiated.`);
+        await notificationService.notify(user?.id!, 'wire_transfer', `Wire transfer of ${txAmount.toLocaleString()} to ${beneficiaryName} initiated.`);
       }
 
       if (txAmount > 1000) {

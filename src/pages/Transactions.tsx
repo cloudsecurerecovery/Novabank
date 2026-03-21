@@ -137,6 +137,35 @@ export default function Transactions() {
     );
   };
 
+  const downloadReceipt = (tx: Transaction) => {
+    const receiptContent = `
+NOVA BANK - TRANSACTION RECEIPT
+--------------------------------
+Reference ID: ${tx.id}
+Date: ${format(new Date(tx.created_at), 'MMMM d, yyyy h:mm:ss a')}
+Description: ${tx.description}
+Amount: ${Number(tx.amount) >= 0 ? '+' : ''}${Number(tx.amount).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+Status: ${tx.status.toUpperCase()}
+--------------------------------
+Thank you for banking with NovaBank.
+    `.trim();
+
+    const blob = new Blob([receiptContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `receipt_${tx.id.slice(0, 8)}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const reportIssue = (tx: Transaction) => {
+    // Navigate to chat or support with pre-filled info
+    window.location.href = `/chat?message=I have an issue with transaction ${tx.id} for ${Number(tx.amount).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}.`;
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -345,10 +374,16 @@ export default function Transactions() {
                                   </div>
 
                                   <div className="flex justify-end gap-3 pt-2">
-                                    <button className="px-6 py-2.5 bg-white border border-slate-200 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-50 transition-all">
+                                    <button 
+                                      onClick={() => downloadReceipt(tx)}
+                                      className="px-6 py-2.5 bg-white border border-slate-200 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-50 transition-all"
+                                    >
                                       Download Receipt
                                     </button>
-                                    <button className="px-6 py-2.5 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-200 transition-all">
+                                    <button 
+                                      onClick={() => reportIssue(tx)}
+                                      className="px-6 py-2.5 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-200 transition-all"
+                                    >
                                       Report Issue
                                     </button>
                                   </div>

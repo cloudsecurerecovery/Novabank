@@ -9,6 +9,7 @@ export interface User {
   phone?: string;
   otp_code?: string;
   otp_expires_at?: string;
+  balance?: number;
 }
 
 interface AuthState {

@@ -58,7 +58,11 @@ export default function VerifyOtp() {
       }
 
       setOtpVerified(true);
-      navigate('/dashboard');
+      if (user.is_admin) {
+        navigate('/admin/dashboard');
+      } else {
+        navigate('/dashboard');
+      }
     } catch (err: any) {
       setError(err.message || 'Verification failed');
     } finally {
@@ -71,7 +75,7 @@ export default function VerifyOtp() {
   }
 
   if (isOtpVerified) {
-    return <Navigate to="/dashboard" replace />;
+    return user?.is_admin ? <Navigate to="/admin/dashboard" replace /> : <Navigate to="/dashboard" replace />;
   }
 
   return (

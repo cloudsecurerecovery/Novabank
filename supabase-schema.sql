@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   email TEXT UNIQUE,
   phone TEXT,
   avatar_url TEXT,
+  balance NUMERIC DEFAULT 0,
   is_admin BOOLEAN DEFAULT FALSE,
   otp_code TEXT,
   otp_expires_at TIMESTAMP WITH TIME ZONE,
@@ -120,7 +121,7 @@ CREATE OR REPLACE FUNCTION transfer_funds(
   receiver_description TEXT
 ) RETURNS BOOLEAN AS $$
 DECLARE
-  sender_balance NUMERIC;
+  current_balance NUMERIC;
 BEGIN
   -- Security Check: Only allow user to send from their own account
   IF sender_id != auth.uid() THEN
@@ -137,17 +138,18 @@ BEGIN
     RAISE EXCEPTION 'You cannot transfer funds to yourself.';
   END IF;
 
-  -- Calculate sender balance (only released transactions)
-  SELECT COALESCE(SUM(amount), 0) INTO sender_balance
-  FROM transactions
-  WHERE user_id = sender_id AND status = 'released';
+  -- Get current balance from profiles (centralized source of truth)
+  SELECT balance INTO current_balance
+  FROM profiles
+  WHERE id = sender_id;
 
   -- Check sufficient funds
-  IF sender_balance < transfer_amount THEN
-    RAISE EXCEPTION 'Insufficient funds: Your available balance is %', sender_balance;
+  IF current_balance < transfer_amount THEN
+    RAISE EXCEPTION 'Insufficient funds: Your available balance is %', current_balance;
   END IF;
 
   -- Atomic Transaction: Debit Sender
+  -- The trigger 'on_transaction_change' will automatically update profiles.balance
   INSERT INTO transactions (user_id, amount, status, description)
   VALUES (sender_id, -transfer_amount, 'released', sender_description);
 
@@ -229,14 +231,14 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger AS $$
 BEGIN
-  INSERT INTO public.profiles (id, full_name, email, phone, is_admin)
+  INSERT INTO public.profiles (id, full_name, email, phone, is_admin, balance)
   VALUES (
     new.id, 
     COALESCE(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', ''), 
     new.email,
     COALESCE(new.raw_user_meta_data->>'phone', ''),
-    -- First user ever could be admin, or just default to false
-    FALSE
+    FALSE,
+    0
   );
   RETURN new;
 END;
@@ -263,6 +265,7 @@ BEGIN
   END IF;
 
   -- Insert transactions for all users
+  -- The trigger 'on_transaction_change' will automatically update profiles.balance for each user
   INSERT INTO transactions (user_id, amount, status, description)
   SELECT id, deposit_amount, 'released', deposit_description
   FROM profiles;
@@ -271,7 +274,40 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- F. Updated At Trigger
+-- F. Balance Update Trigger
+-- Automatically updates profiles.balance when transactions are added/modified
+CREATE OR REPLACE FUNCTION update_profile_balance()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- We only care about 'released' transactions for the balance
+  
+  -- INSERT
+  IF (TG_OP = 'INSERT' AND NEW.status = 'released') THEN
+    UPDATE profiles SET balance = balance + NEW.amount WHERE id = NEW.user_id;
+  
+  -- UPDATE
+  ELSIF (TG_OP = 'UPDATE') THEN
+    -- Status changed to released
+    IF (OLD.status != 'released' AND NEW.status = 'released') THEN
+      UPDATE profiles SET balance = balance + NEW.amount WHERE id = NEW.user_id;
+    -- Status changed FROM released
+    ELSIF (OLD.status = 'released' AND NEW.status != 'released') THEN
+      UPDATE profiles SET balance = balance - OLD.amount WHERE id = OLD.user_id;
+    -- Amount changed while remaining released
+    ELSIF (OLD.status = 'released' AND NEW.status = 'released' AND OLD.amount != NEW.amount) THEN
+      UPDATE profiles SET balance = balance - OLD.amount + NEW.amount WHERE id = NEW.user_id;
+    END IF;
+    
+  -- DELETE
+  ELSIF (TG_OP = 'DELETE' AND OLD.status = 'released') THEN
+    UPDATE profiles SET balance = balance - OLD.amount WHERE id = OLD.user_id;
+  END IF;
+  
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- G. Updated At Trigger
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -280,7 +316,7 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Re-create trigger
+-- Re-create triggers
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
@@ -290,6 +326,11 @@ DROP TRIGGER IF EXISTS update_profiles_updated_at ON profiles;
 CREATE TRIGGER update_profiles_updated_at 
   BEFORE UPDATE ON profiles 
   FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
+
+DROP TRIGGER IF EXISTS on_transaction_change ON transactions;
+CREATE TRIGGER on_transaction_change
+  AFTER INSERT OR UPDATE OR DELETE ON transactions
+  FOR EACH ROW EXECUTE PROCEDURE update_profile_balance();
 
 -- ROW LEVEL SECURITY (RLS) POLICIES
 

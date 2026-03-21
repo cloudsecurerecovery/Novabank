@@ -108,17 +108,27 @@ export default function AdminTransactions() {
   const handleStatusChange = async (id: string, newStatus: string) => {
     setActionLoading(id);
     try {
+      const tx = transactions.find(t => t.id === id);
+      if (!tx) return;
+
+      const oldStatus = tx.status;
+      const targetStatus = newStatus.toLowerCase() as Transaction['status'];
+      const amount = tx.amount;
+      const userId = tx.user_id;
+
       const { error } = await supabase
         .from('transactions')
-        .update({ status: newStatus.toLowerCase() })
+        .update({ status: targetStatus })
         .eq('id', id);
 
       if (error) throw error;
 
       // Log to audit log
       const { auditService } = await import('../../services/auditService');
-      await auditService.log(id, 'transaction_status_change', {
-        new_status: newStatus,
+      await auditService.log(userId, 'transaction_status_change', {
+        transaction_id: id,
+        old_status: oldStatus,
+        new_status: targetStatus,
         admin_id: (await supabase.auth.getUser()).data.user?.id
       });
 
@@ -286,6 +296,36 @@ export default function AdminTransactions() {
     { id: 'reversible', label: 'Reversible' },
   ];
 
+  const exportToCSV = () => {
+    if (filteredTransactions.length === 0) return;
+
+    const headers = ['ID', 'Date', 'Customer', 'Email', 'Amount', 'Status', 'Description'];
+    const rows = filteredTransactions.map(tx => [
+      tx.id,
+      format(new Date(tx.created_at), 'yyyy-MM-dd HH:mm:ss'),
+      tx.profiles?.full_name || 'Unknown',
+      tx.profiles?.email || 'Unknown',
+      tx.amount,
+      tx.status,
+      tx.description
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `transactions_export_${format(new Date(), 'yyyyMMdd_HHmmss')}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -302,7 +342,11 @@ export default function AdminTransactions() {
           <p className="text-slate-500 font-medium">Monitor and manage all system transactions.</p>
         </div>
         <div className="flex items-center gap-3">
-          <button className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-700 hover:bg-slate-50 transition-all shadow-sm">
+          <button 
+            onClick={exportToCSV}
+            disabled={filteredTransactions.length === 0}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-700 hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50"
+          >
             <Download className="w-4 h-4" />
             Export CSV
           </button>

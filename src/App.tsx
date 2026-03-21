@@ -91,6 +91,7 @@ export default function App() {
           is_admin: data.is_admin,
           avatar_url: signedAvatarUrl,
           phone: data.phone,
+          balance: data.balance || 0,
         });
       } else {
         login({
@@ -174,7 +175,13 @@ export default function App() {
           </Route>
         </Route>
 
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/" element={
+          user ? (
+            user.is_admin ? <Navigate to="/admin/dashboard" replace /> : <Navigate to="/dashboard" replace />
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        } />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>

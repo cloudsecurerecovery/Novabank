@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment } from 'react';
+import { useState, useEffect, Fragment, useCallback } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { supabase } from '../supabaseClient';
 import { format, subDays, startOfDay } from 'date-fns';
@@ -27,10 +27,10 @@ interface AdminNote {
 }
 
 export default function Dashboard() {
-  const { user } = useAuthStore();
+  const { user, updateUser } = useAuthStore();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [adminNotes, setAdminNotes] = useState<AdminNote[]>([]);
-  const [balance, setBalance] = useState(0);
+  const [balance, setBalance] = useState(user?.balance || 0);
   const [loading, setLoading] = useState(true);
   const [expandedTxId, setExpandedTxId] = useState<string | null>(null);
   const [chartData, setChartData] = useState<any[]>([]);
@@ -39,6 +39,34 @@ export default function Dashboard() {
 
   const toggleExpand = (txId: string) => {
     setExpandedTxId(expandedTxId === txId ? null : txId);
+  };
+
+  const downloadReceipt = (tx: any) => {
+    const receiptContent = `
+NOVA BANK - TRANSACTION RECEIPT
+--------------------------------
+Reference ID: ${tx.id}
+Date: ${format(new Date(tx.created_at), 'MMMM d, yyyy h:mm:ss a')}
+Description: ${tx.description}
+Amount: ${Number(tx.amount) >= 0 ? '+' : ''}${Number(tx.amount).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+Status: ${tx.status.toUpperCase()}
+--------------------------------
+Thank you for banking with NovaBank.
+    `.trim();
+
+    const blob = new Blob([receiptContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `receipt_${tx.id.slice(0, 8)}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const reportIssue = (tx: any) => {
+    window.location.href = `/chat?message=I have an issue with transaction ${tx.id} for ${Number(tx.amount).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}.`;
   };
 
   const copyToClipboard = (text: string, id: string) => {
@@ -62,88 +90,122 @@ export default function Dashboard() {
     }
   };
 
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      if (!user) return;
-      
-      try {
-        // Fetch transactions with documents
-        const { data: txData, error: txError } = await supabase
-          .from('transactions')
-          .select(`
-            *,
-            user_documents:user_documents(id, file_path, file_name)
-          `)
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false });
+  const fetchDashboardData = useCallback(async () => {
+    if (!user) return;
+    
+    try {
+      // 1. Fetch Profile for latest balance
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('balance')
+        .eq('id', user.id)
+        .single();
 
-        if (txError) throw txError;
+      if (!profileError && profile) {
+        setBalance(profile.balance || 0);
+        updateUser({ balance: profile.balance || 0 });
+      }
 
-        if (txData) {
-          setTransactions(txData);
-          // Calculate balance from released transactions
+      // 2. Fetch transactions with documents
+      const { data: txData, error: txError } = await supabase
+        .from('transactions')
+        .select(`
+          *,
+          user_documents:user_documents(id, file_path, file_name)
+        `)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (txError) throw txError;
+
+      if (txData) {
+        setTransactions(txData);
+        
+        // If profile balance is missing, calculate from released transactions as fallback
+        if (profile?.balance === undefined || profile?.balance === null) {
           const calculatedBalance = txData
             .filter(tx => tx.status === 'released')
             .reduce((sum, tx) => sum + Number(tx.amount), 0);
           setBalance(calculatedBalance);
-
-          // Generate chart data for the last 7 days
-          const last7Days = Array.from({ length: 7 }, (_, i) => {
-            const date = subDays(new Date(), i);
-            return {
-              date: format(date, 'MMM d'),
-              fullDate: startOfDay(date),
-              balance: 0
-            };
-          }).reverse();
-
-          let runningBalance = calculatedBalance;
-          const sortedTxs = [...txData].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-          
-          const historyData = last7Days.map(day => {
-            const dayTxs = sortedTxs.filter(tx => 
-              startOfDay(new Date(tx.created_at)).getTime() === day.fullDate.getTime() && 
-              tx.status === 'released'
-            );
-            const dayChange = dayTxs.reduce((sum, tx) => sum + Number(tx.amount), 0);
-            const dataPoint = { ...day, balance: runningBalance };
-            runningBalance -= dayChange; // Work backwards
-            return dataPoint;
-          }).reverse();
-
-          setChartData(historyData);
+          updateUser({ balance: calculatedBalance });
         }
 
-        // Fetch admin notes (warnings/notifications)
-        const { data: notesData, error: notesError } = await supabase
-          .from('admin_notes')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('is_read', false)
-          .order('created_at', { ascending: false });
+        // Generate chart data for the last 7 days
+        const last7Days = Array.from({ length: 7 }, (_, i) => {
+          const date = subDays(new Date(), i);
+          return {
+            date: format(date, 'MMM d'),
+            fullDate: startOfDay(date),
+            balance: 0
+          };
+        }).reverse();
 
-        if (notesError) throw notesError;
-        if (notesData) {
-          setAdminNotes(notesData);
-        }
+        let runningBalance = balance;
+        const sortedTxs = [...txData].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        
+        const historyData = last7Days.map(day => {
+          const dayTxs = sortedTxs.filter(tx => 
+            startOfDay(new Date(tx.created_at)).getTime() === day.fullDate.getTime() && 
+            tx.status === 'released'
+          );
+          const dayChange = dayTxs.reduce((sum, tx) => sum + Number(tx.amount), 0);
+          const dataPoint = { ...day, balance: runningBalance };
+          runningBalance -= dayChange; // Work backwards
+          return dataPoint;
+        }).reverse();
 
-      } catch (error) {
-        console.error('Error fetching dashboard data:', error);
-      } finally {
-        setLoading(false);
+        setChartData(historyData);
       }
-    };
 
+      // 3. Fetch admin notes (warnings/notifications)
+      const { data: notesData, error: notesError } = await supabase
+        .from('admin_notes')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('is_read', false)
+        .order('created_at', { ascending: false });
+
+      if (notesError) throw notesError;
+      if (notesData) {
+        setAdminNotes(notesData);
+      }
+
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [user, balance, updateUser]);
+
+  useEffect(() => {
     fetchDashboardData();
+
+    if (!user) return;
+
+    // Subscribe to realtime changes for profile (balance updates)
+    const profileSubscription = supabase
+      .channel(`profile-dashboard-${user.id}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'profiles',
+        filter: `id=eq.${user.id}`
+      }, (payload) => {
+        if (payload.new.balance !== undefined) {
+          setBalance(payload.new.balance);
+          updateUser({ balance: payload.new.balance });
+        }
+      })
+      .subscribe();
 
     // Subscribe to realtime changes for transactions
     const txSubscription = supabase
-      .channel('public:transactions')
+      .channel(`transactions-dashboard-${user.id}`)
       .on('postgres_changes', { 
         event: '*', 
         schema: 'public', 
         table: 'transactions',
-        filter: `user_id=eq.${user?.id}`
+        filter: `user_id=eq.${user.id}`
       }, () => {
         fetchDashboardData();
       })
@@ -151,22 +213,23 @@ export default function Dashboard() {
 
     // Subscribe to realtime changes for admin notes
     const notesSubscription = supabase
-      .channel('public:admin_notes')
+      .channel(`admin-notes-dashboard-${user.id}`)
       .on('postgres_changes', { 
         event: '*', 
         schema: 'public', 
         table: 'admin_notes',
-        filter: `user_id=eq.${user?.id}`
+        filter: `user_id=eq.${user.id}`
       }, () => {
         fetchDashboardData();
       })
       .subscribe();
 
     return () => {
+      profileSubscription.unsubscribe();
       txSubscription.unsubscribe();
       notesSubscription.unsubscribe();
     };
-  }, [user]);
+  }, [user, fetchDashboardData, updateUser]);
 
   useEffect(() => {
     const loadCheckImages = async () => {
@@ -476,12 +539,18 @@ export default function Dashboard() {
                                       )}
 
                                       <div className="flex justify-end gap-3 pt-2">
-                                        <button className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-50 transition-all">
+                                        <button 
+                                          onClick={() => downloadReceipt(tx)}
+                                          className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-50 transition-all"
+                                        >
                                           Download Receipt
                                         </button>
-                                        <Link to="/support" className="px-4 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-200 transition-all">
+                                        <button 
+                                          onClick={() => reportIssue(tx)}
+                                          className="px-4 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-200 transition-all"
+                                        >
                                           Report Issue
-                                        </Link>
+                                        </button>
                                       </div>
                                     </div>
                                   </div>
