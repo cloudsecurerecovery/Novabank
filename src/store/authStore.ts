@@ -8,6 +8,10 @@ export interface User {
   role?: string;
   avatar_url?: string;
   phone?: string;
+  account_status?: 'active' | 'frozen' | 'blocked' | 'pending_kyc';
+  kyc_status?: 'unverified' | 'pending' | 'verified' | 'rejected';
+  daily_limit?: number;
+  admin_notes?: string;
   otp_code?: string;
   otp_expires_at?: string;
   balance?: number;

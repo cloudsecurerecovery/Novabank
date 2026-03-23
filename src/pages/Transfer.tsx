@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { supabase } from '../supabaseClient';
 import { ArrowRight, CheckCircle2, AlertCircle, Building2, User, DollarSign, Text, ShieldCheck, History, Search, ArrowLeft, Loader2, Mail, Upload, Globe, Plus, Bell, Send, XCircle } from 'lucide-react';
+import { Toaster, toast } from 'react-hot-toast';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { auditService } from '../services/auditService';
@@ -15,7 +16,7 @@ interface RecentRecipient {
   full_name: string;
 }
 
-type Step = 'details' | 'confirm' | 'success';
+type Step = 'details' | 'confirm' | 'otp' | 'success';
 type TransferType = 'standard' | 'deposit' | 'wire';
 
 export default function Transfer() {
@@ -49,6 +50,8 @@ export default function Transfer() {
   const [description, setDescription] = useState('');
   const [recentRecipients, setRecentRecipients] = useState<RecentRecipient[]>([]);
   const [recipientName, setRecipientName] = useState('');
+  const [saveBeneficiary, setSaveBeneficiary] = useState(false);
+  const [beneficiaryNickname, setBeneficiaryNickname] = useState('');
 
   // Deposit State
   const [depositMethod, setDepositMethod] = useState<'check' | 'ach'>('check');
@@ -63,6 +66,12 @@ export default function Transfer() {
   const [bankName, setBankName] = useState('');
   const [swiftCode, setSwiftCode] = useState('');
   const [purpose, setPurpose] = useState('');
+  const [beneficiaryAddress, setBeneficiaryAddress] = useState('');
+  const [bankAddress, setBankAddress] = useState('');
+
+  const [otp, setOtp] = useState('');
+  const [otpError, setOtpError] = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
 
   const fetchBalance = useCallback(async () => {
     if (!user) return;
@@ -145,6 +154,11 @@ export default function Transfer() {
       return;
     }
 
+    if (user?.account_status && user.account_status !== 'active') {
+      setError(`Your account is currently ${user.account_status.replace('_', ' ')}. Transfers are restricted.`);
+      return;
+    }
+
     if (transferType === 'standard') {
       if (!validateEmail(receiverEmail)) {
         setError('Please enter a valid recipient email address.');
@@ -169,6 +183,24 @@ export default function Transfer() {
 
         if (parseFloat(amount) > balance) {
           throw new Error('Insufficient balance for this transfer.');
+        }
+
+        // Check daily limit
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const { data: todayTxs, error: limitError } = await supabase
+          .from('transactions')
+          .select('amount')
+          .eq('user_id', user?.id)
+          .gte('created_at', today.toISOString())
+          .lt('amount', 0); // Only outgoing
+
+        if (!limitError && todayTxs) {
+          const dailyTotal = Math.abs(todayTxs.reduce((sum, tx) => sum + Number(tx.amount), 0));
+          const limit = user?.daily_limit || 5000;
+          if (dailyTotal + parseFloat(amount) > limit) {
+            throw new Error(`Daily transfer limit exceeded. Remaining: $${(limit - dailyTotal).toLocaleString()}`);
+          }
         }
 
         setRecipientName(data.full_name);
@@ -211,6 +243,26 @@ export default function Transfer() {
 
   const handleProcess = async () => {
     setError('');
+    
+    // Check for large transfer and require OTP if not already verified for this action
+    if (parseFloat(amount) > 1000 && step !== 'otp') {
+      setLoading(true);
+      try {
+        const { error: otpGenError } = await supabase.rpc('generate_otp', {
+          target_user_id: user?.id
+        });
+        if (otpGenError) throw otpGenError;
+        setStep('otp');
+        toast.success('Security code sent for large transfer verification');
+        return;
+      } catch (err: any) {
+        setError('Failed to generate security code. Please try again.');
+        return;
+      } finally {
+        setLoading(false);
+      }
+    }
+
     setLoading(true);
 
     const txAmount = parseFloat(amount);
@@ -234,6 +286,13 @@ export default function Transfer() {
         });
 
         if (txError) throw txError;
+
+        if (saveBeneficiary) {
+          await supabase.rpc('add_beneficiary', {
+            target_beneficiary_id: receiverData.id,
+            target_nickname: beneficiaryNickname || recipientName
+          });
+        }
 
         await auditService.log(user?.id!, 'transfer_sent', { amount: txAmount, to: receiverEmail });
         await auditService.log(receiverData.id, 'transfer_received', { amount: txAmount, from: user?.email });
@@ -270,15 +329,30 @@ export default function Transfer() {
         await notificationService.notify(user?.id!, 'deposit', `Deposit of ${txAmount.toLocaleString()} is pending review.`);
       }
       else if (transferType === 'wire') {
-        const { error: txError } = await supabase.from('transactions').insert({
+        const { data: txData, error: txError } = await supabase.from('transactions').insert({
           user_id: user?.id,
           amount: -txAmount,
           status: 'pending',
           description: `Wire Transfer (${wireType}) to ${beneficiaryName}`,
           created_at: new Date().toISOString()
-        });
+        }).select().single();
 
         if (txError) throw txError;
+
+        if (txData) {
+          const { error: wireDetailsError } = await supabase.from('wire_transfer_details').insert({
+            transaction_id: txData.id,
+            bank_name: bankName,
+            swift_bic: swiftCode || 'N/A',
+            account_number: accountNumber,
+            routing_number: routingNumber,
+            recipient_address: beneficiaryAddress,
+            bank_address: bankAddress,
+            wire_type: wireType
+          });
+
+          if (wireDetailsError) console.error('Error saving wire details:', wireDetailsError);
+        }
 
         await auditService.log(user?.id!, 'wire_transfer', { amount: txAmount, to: beneficiaryName, type: wireType });
         await notificationService.notify(user?.id!, 'wire_transfer', `Wire transfer of ${txAmount.toLocaleString()} to ${beneficiaryName} initiated.`);
@@ -293,6 +367,37 @@ export default function Transfer() {
       setError(err.message || 'An error occurred during processing.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (otp.length !== 6) {
+      setOtpError('Please enter a 6-digit code.');
+      return;
+    }
+
+    setOtpLoading(true);
+    setOtpError('');
+
+    try {
+      const { data, error: verifyError } = await supabase.rpc('verify_otp', {
+        target_user_id: user?.id,
+        input_otp: otp
+      });
+
+      if (verifyError) throw verifyError;
+
+      if (data === true) {
+        // OTP verified, proceed with the transfer
+        await handleProcess();
+      } else {
+        setOtpError('Invalid or expired security code.');
+      }
+    } catch (err: any) {
+      setOtpError(err.message || 'Failed to verify security code.');
+    } finally {
+      setOtpLoading(false);
     }
   };
 
@@ -419,6 +524,35 @@ export default function Transfer() {
                               ))}
                             </div>
                           </div>
+                        )}
+
+                        <div className="pt-4 flex items-center gap-3">
+                          <label className="relative flex items-center cursor-pointer">
+                            <input 
+                              type="checkbox" 
+                              className="sr-only peer" 
+                              checked={saveBeneficiary}
+                              onChange={(e) => setSaveBeneficiary(e.target.checked)}
+                            />
+                            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#007856]"></div>
+                            <span className="ml-3 text-sm font-bold text-slate-600">Save as Beneficiary</span>
+                          </label>
+                        </div>
+
+                        {saveBeneficiary && (
+                          <motion.div 
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            className="pt-2"
+                          >
+                            <input
+                              type="text"
+                              value={beneficiaryNickname}
+                              onChange={(e) => setBeneficiaryNickname(e.target.value)}
+                              className="w-full bg-slate-50 border-none rounded-xl py-3 px-4 text-sm font-medium focus:ring-2 focus:ring-[#007856]/20"
+                              placeholder="Nickname (e.g. Mom, Rent)"
+                            />
+                          </motion.div>
                         )}
                       </div>
                     </>
@@ -563,6 +697,26 @@ export default function Transfer() {
                             onChange={(e) => setBankName(e.target.value)}
                             className="w-full bg-slate-50 border-none rounded-xl py-3 px-4 text-sm font-medium focus:ring-2 focus:ring-[#007856]/20"
                             placeholder="Bank Name"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Beneficiary Address</label>
+                          <input
+                            type="text"
+                            value={beneficiaryAddress}
+                            onChange={(e) => setBeneficiaryAddress(e.target.value)}
+                            className="w-full bg-slate-50 border-none rounded-xl py-3 px-4 text-sm font-medium focus:ring-2 focus:ring-[#007856]/20"
+                            placeholder="Street, City, Country"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Bank Address</label>
+                          <input
+                            type="text"
+                            value={bankAddress}
+                            onChange={(e) => setBankAddress(e.target.value)}
+                            className="w-full bg-slate-50 border-none rounded-xl py-3 px-4 text-sm font-medium focus:ring-2 focus:ring-[#007856]/20"
+                            placeholder="Bank Branch Address"
                           />
                         </div>
                         {wireType === 'international' && (
@@ -729,6 +883,76 @@ export default function Transfer() {
                     </>
                   )}
                 </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {step === 'otp' && (
+          <motion.div
+            key="otp"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 1.05 }}
+            className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 overflow-hidden"
+          >
+            <div className="p-8">
+              <div className="flex items-center gap-4 mb-8">
+                <button 
+                  onClick={() => setStep('confirm')}
+                  className="p-2 rounded-xl hover:bg-slate-100 text-slate-500 transition-colors"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+                <h2 className="text-xl font-bold text-slate-900">Security Verification</h2>
+              </div>
+
+              <div className="space-y-6">
+                <div className="bg-emerald-50 rounded-2xl p-6 border border-emerald-100 flex items-start gap-4">
+                  <ShieldCheck className="w-6 h-6 text-emerald-600 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-bold text-emerald-900">Large Transfer Protection</p>
+                    <p className="text-xs text-emerald-700 mt-1 leading-relaxed">
+                      For your security, transfers over $1,000.00 require a one-time security code sent to your registered device.
+                    </p>
+                  </div>
+                </div>
+
+                <form onSubmit={handleVerifyOtp} className="space-y-6">
+                  {otpError && (
+                    <div className="bg-red-50 border border-red-100 p-3 rounded-xl flex items-center gap-2 text-red-600 text-xs font-medium">
+                      <AlertCircle className="w-4 h-4" />
+                      {otpError}
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Enter 6-Digit Code</label>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+                      className="w-full bg-slate-50 border-none rounded-2xl py-4 text-center text-3xl font-bold tracking-[0.5em] focus:ring-2 focus:ring-[#007856]/20"
+                      placeholder="000000"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={otpLoading || otp.length !== 6}
+                    className="w-full flex items-center justify-center gap-3 py-5 bg-[#007856] text-white font-bold rounded-2xl hover:bg-[#006045] transition-all shadow-lg shadow-emerald-200 disabled:opacity-50"
+                  >
+                    {otpLoading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <>
+                        Verify & Complete Transfer
+                        <CheckCircle2 className="w-5 h-5" />
+                      </>
+                    )}
+                  </button>
+                </form>
               </div>
             </div>
           </motion.div>

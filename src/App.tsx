@@ -16,14 +16,15 @@ import Cards from './pages/Cards';
 import Notifications from './pages/Notifications';
 import SupportChat from './pages/SupportChat';
 import Transactions from './pages/Transactions';
+import AdminDashboard from './pages/admin/AdminDashboard';
+import AdminUsers from './pages/admin/AdminUsers';
+import AdminAuditLogs from './pages/admin/AdminAuditLogs';
+import AdminSupport from './pages/admin/AdminSupport';
+import AdminSettings from './pages/admin/AdminSettings';
+import AdminNotifications from './pages/admin/AdminNotifications';
 import NotFound from './pages/NotFound';
 import Layout from './components/Layout';
-import { ProtectedRoute, AdminRoute } from './components/ProtectedRoute';
-import AdminUsers from './pages/admin/Users';
-import AdminTransactions from './pages/admin/Transactions';
-import AdminChat from './pages/admin/AdminChat';
-import AdminDashboard from './pages/admin/AdminDashboard';
-import AuditLogs from './pages/admin/AuditLogs';
+import { ProtectedRoute } from './components/ProtectedRoute';
 
 export default function App() {
   const { login, logout, user } = useAuthStore();
@@ -165,20 +166,22 @@ export default function App() {
             <Route path="/support" element={<SupportChat />} />
 
             {/* Admin Routes */}
-            <Route element={<AdminRoute />}>
-              <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
-              <Route path="/admin/dashboard" element={<AdminDashboard />} />
-              <Route path="/admin/users" element={<AdminUsers />} />
-              <Route path="/admin/transactions" element={<AdminTransactions />} />
-              <Route path="/admin/chat" element={<AdminChat />} />
-              <Route path="/admin/audit" element={<AuditLogs />} />
-            </Route>
+            {user?.is_admin && (
+              <>
+                <Route path="/admin" element={<AdminDashboard />} />
+                <Route path="/admin/users" element={<AdminUsers />} />
+                <Route path="/admin/audit" element={<AdminAuditLogs />} />
+                <Route path="/admin/support" element={<AdminSupport />} />
+                <Route path="/admin/settings" element={<AdminSettings />} />
+                <Route path="/admin/notifications" element={<AdminNotifications />} />
+              </>
+            )}
           </Route>
         </Route>
 
         <Route path="/" element={
           user ? (
-            user.is_admin ? <Navigate to="/admin/dashboard" replace /> : <Navigate to="/dashboard" replace />
+            <Navigate to="/dashboard" replace />
           ) : (
             <Navigate to="/login" replace />
           )

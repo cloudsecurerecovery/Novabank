@@ -1,4 +1,5 @@
 import { useState, useEffect, Fragment } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { supabase } from '../supabaseClient';
 import { format } from 'date-fns';
@@ -35,11 +36,14 @@ interface Transaction {
 
 export default function Transactions() {
   const { user } = useAuthStore();
+  const navigate = useNavigate();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedTxId, setExpandedTxId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
   const [checkImages, setCheckImages] = useState<Record<string, string>>({});
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
 
@@ -126,7 +130,12 @@ export default function Transactions() {
     const matchesSearch = tx.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          tx.id.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(tx.status);
-    return matchesSearch && matchesStatus;
+    
+    const txDate = new Date(tx.created_at);
+    const matchesDate = (!startDate || txDate >= new Date(startDate)) &&
+                        (!endDate || txDate <= new Date(endDate + 'T23:59:59.999Z'));
+                        
+    return matchesSearch && matchesStatus && matchesDate;
   });
 
   const toggleStatus = (status: string) => {
@@ -163,7 +172,7 @@ Thank you for banking with NovaBank.
 
   const reportIssue = (tx: Transaction) => {
     // Navigate to chat or support with pre-filled info
-    window.location.href = `/chat?message=I have an issue with transaction ${tx.id} for ${Number(tx.amount).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}.`;
+    navigate(`/support?message=I have an issue with transaction ${tx.id} for ${Number(tx.amount).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}.`);
   };
 
   if (loading) {
@@ -204,6 +213,33 @@ Thank you for banking with NovaBank.
           />
         </div>
         
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Start Date:</label>
+            <div className="relative">
+              <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-[#007856]/20 transition-all"
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">End Date:</label>
+            <div className="relative">
+              <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-[#007856]/20 transition-all"
+              />
+            </div>
+          </div>
+        </div>
+        
         <div className="flex flex-wrap gap-2 items-center">
           <div className="flex items-center gap-2 mr-2">
             <Filter className="h-4 w-4 text-slate-400" />
@@ -222,9 +258,14 @@ Thank you for banking with NovaBank.
               {status.charAt(0).toUpperCase() + status.slice(1)}
             </button>
           ))}
-          {selectedStatuses.length > 0 && (
+          {(selectedStatuses.length > 0 || startDate || endDate || searchQuery) && (
             <button 
-              onClick={() => setSelectedStatuses([])}
+              onClick={() => {
+                setSelectedStatuses([]);
+                setStartDate('');
+                setEndDate('');
+                setSearchQuery('');
+              }}
               className="text-xs font-bold text-slate-400 hover:text-slate-600 ml-2"
             >
               Clear Filters

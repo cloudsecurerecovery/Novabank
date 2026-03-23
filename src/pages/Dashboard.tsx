@@ -5,7 +5,7 @@ import { format, subDays, startOfDay } from 'date-fns';
 import { ArrowUpRight, ArrowDownLeft, Clock, CheckCircle2, AlertCircle, AlertTriangle, X, ChevronDown, ChevronUp, Info, Send, ShieldCheck, PieChart, CreditCard, Building2, MessageSquare, UserCircle, Globe, Upload, Download } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 interface Transaction {
   id: string;
@@ -28,6 +28,7 @@ interface AdminNote {
 
 export default function Dashboard() {
   const { user, updateUser } = useAuthStore();
+  const navigate = useNavigate();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [adminNotes, setAdminNotes] = useState<AdminNote[]>([]);
   const [balance, setBalance] = useState(user?.balance || 0);
@@ -66,7 +67,7 @@ Thank you for banking with NovaBank.
   };
 
   const reportIssue = (tx: any) => {
-    window.location.href = `/chat?message=I have an issue with transaction ${tx.id} for ${Number(tx.amount).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}.`;
+    navigate(`/support?message=I have an issue with transaction ${tx.id} for ${Number(tx.amount).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}.`);
   };
 
   const copyToClipboard = (text: string, id: string) => {

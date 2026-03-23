@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { supabase } from '../supabaseClient';
 import { Send, UserCircle, MessageSquare, ShieldCheck, Clock, Check } from 'lucide-react';
@@ -15,10 +16,17 @@ interface ChatMessage {
 
 export default function SupportChat() {
   const { user } = useAuthStore();
+  const [searchParams] = useSearchParams();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [newMessage, setNewMessage] = useState('');
+  const [newMessage, setNewMessage] = useState(searchParams.get('message') || '');
   const [loading, setLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (searchParams.get('message')) {
+      setNewMessage(searchParams.get('message') || '');
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!user) return;
@@ -28,7 +36,7 @@ export default function SupportChat() {
         const { data, error } = await supabase
           .from('messages')
           .select('*')
-          .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
+          .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id},receiver_id.eq.admin,receiver_id.eq.admin-system`)
           .order('created_at', { ascending: true });
 
         if (error) throw error;
@@ -49,14 +57,6 @@ export default function SupportChat() {
         event: 'INSERT', 
         schema: 'public', 
         table: 'messages',
-        filter: `receiver_id=eq.${user.id}`
-      }, (payload) => {
-        setMessages(prev => [...prev, payload.new as ChatMessage]);
-      })
-      .on('postgres_changes', { 
-        event: 'INSERT', 
-        schema: 'public', 
-        table: 'messages',
         filter: `sender_id=eq.${user.id}`
       }, (payload) => {
         // Only add if we didn't just add it optimistically
@@ -64,6 +64,19 @@ export default function SupportChat() {
           if (prev.find(m => m.id === payload.new.id)) return prev;
           return [...prev, payload.new as ChatMessage];
         });
+      })
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'messages'
+      }, (payload) => {
+        // Handle incoming messages from admin
+        if (payload.new.receiver_id === user.id) {
+          setMessages(prev => {
+            if (prev.find(m => m.id === payload.new.id)) return prev;
+            return [...prev, payload.new as ChatMessage];
+          });
+        }
       })
       .subscribe();
 

@@ -14,21 +14,3 @@ export const ProtectedRoute = () => {
 
   return <Outlet />;
 };
-
-export const AdminRoute = () => {
-  const { user, isAuthenticated, isOtpVerified } = useAuthStore();
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (!isOtpVerified) {
-    return <Navigate to="/verify-otp" replace />;
-  }
-
-  if (!user?.is_admin) {
-    return <Navigate to="/dashboard" replace />;
-  }
-
-  return <Outlet />;
-};

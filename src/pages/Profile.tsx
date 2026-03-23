@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { supabase } from '../supabaseClient';
-import { User, Mail, Phone, Camera, CheckCircle2, AlertCircle, Save, Lock, Shield, Trash2, FileText, Upload, Download, Loader2, XCircle } from 'lucide-react';
+import { User, Mail, Phone, Camera, CheckCircle2, AlertCircle, Save, Lock, Shield, Trash2, FileText, Upload, Download, Loader2, XCircle, History } from 'lucide-react';
 import { storageService } from '../services/storageService';
+import { format } from 'date-fns';
 import { AvatarImage } from '../components/AvatarImage';
 import { validatePhone, validatePassword } from '../utils/validation';
+import ConfirmModal from '../components/ConfirmModal';
 
 interface UserDocument {
   id: string;
@@ -38,6 +40,20 @@ export default function Profile() {
   const [passwordSuccess, setPasswordSuccess] = useState(false);
   const [passwordError, setPasswordError] = useState('');
 
+  // OTP for sensitive actions
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpError, setOtpError] = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'password' | null>(null);
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [docToDelete, setDocToDelete] = useState<string | null>(null);
+  const [kycLoading, setKycLoading] = useState(false);
+
+  // Audit logs state
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+
   useEffect(() => {
     if (user) {
       setFormData({
@@ -46,8 +62,29 @@ export default function Profile() {
       });
       setProfileImage(user.avatar_url || '');
       fetchDocuments();
+      fetchAuditLogs();
     }
   }, [user]);
+
+  const fetchAuditLogs = async () => {
+    if (!user) return;
+    setLogsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('audit_logs')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (error) throw error;
+      setAuditLogs(data || []);
+    } catch (err) {
+      console.error('Error fetching audit logs:', err);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
 
   const fetchDocuments = async () => {
     if (!user) return;
@@ -109,25 +146,68 @@ export default function Profile() {
   };
 
   const handleDeleteDocument = async (doc: UserDocument) => {
-    if (!window.confirm('Are you sure you want to delete this document?')) return;
+    setDocToDelete(doc.id);
+    setIsConfirmOpen(true);
+  };
 
+  const confirmDeleteDoc = async () => {
+    if (!docToDelete) return;
+    
     try {
       setDocsLoading(true);
-      // Delete from storage
-      await storageService.deleteFile(doc.file_path);
+      const doc = documents.find(d => d.id === docToDelete);
+      if (doc) {
+        // Delete from storage
+        await storageService.deleteFile(doc.file_path);
 
-      // Delete from database
-      const { error } = await supabase
-        .from('user_documents')
-        .delete()
-        .eq('id', doc.id);
+        // Delete from database
+        const { error } = await supabase
+          .from('user_documents')
+          .delete()
+          .eq('id', doc.id);
 
-      if (error) throw error;
-      await fetchDocuments();
+        if (error) throw error;
+        await fetchDocuments();
+      }
     } catch (err: any) {
       setError(err.message || 'Error deleting document');
     } finally {
       setDocsLoading(false);
+      setDocToDelete(null);
+    }
+  };
+
+  const handleSubmitKyc = async () => {
+    if (!user) return;
+    if (documents.length === 0) {
+      setError('Please upload at least one document (ID or Proof of Address) before submitting for verification.');
+      return;
+    }
+
+    setKycLoading(true);
+    setError('');
+
+    try {
+      const { error: kycError } = await supabase.rpc('submit_kyc', {
+        target_user_id: user.id
+      });
+
+      if (kycError) throw kycError;
+
+      updateUser({ kyc_status: 'pending' });
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
+      
+      // Log to audit log
+      const { auditService } = await import('../services/auditService');
+      await auditService.log(user.id, 'kyc_submission', {
+        document_count: documents.length
+      });
+      
+    } catch (err: any) {
+      setError(err.message || 'Failed to submit KYC verification');
+    } finally {
+      setKycLoading(false);
     }
   };
 
@@ -292,30 +372,69 @@ export default function Profile() {
     setPasswordLoading(true);
 
     try {
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: newPassword
+      // Trigger OTP for password change
+      const { error: otpGenError } = await supabase.rpc('generate_otp', {
+        target_user_id: user.id
       });
+      if (otpGenError) throw otpGenError;
 
-      if (updateError) throw updateError;
-
-      // Notify on password change
-      const { notificationService } = await import('../services/notificationService');
-      await notificationService.notify(user.id, 'password_change', 'Your password was successfully updated.');
-
-      // Log to audit log
-      const { auditService } = await import('../services/auditService');
-      await auditService.log(user.id, 'password_change', {
-        timestamp: new Date().toISOString()
-      });
-
-      setPasswordSuccess(true);
-      setNewPassword('');
-      setConfirmPassword('');
-      setTimeout(() => setPasswordSuccess(false), 3000);
+      setPendingAction('password');
+      setShowOtpModal(true);
     } catch (err: any) {
-      setPasswordError(err.message || 'Failed to update password');
+      setPasswordError(err.message || 'Failed to initiate security verification');
     } finally {
       setPasswordLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || otpCode.length !== 6) return;
+
+    setOtpLoading(true);
+    setOtpError('');
+
+    try {
+      const { data: verified, error: verifyError } = await supabase.rpc('verify_otp', {
+        target_user_id: user.id,
+        input_otp: otpCode
+      });
+
+      if (verifyError) throw verifyError;
+
+      if (verified) {
+        if (pendingAction === 'password') {
+          const { error: updateError } = await supabase.auth.updateUser({
+            password: newPassword
+          });
+
+          if (updateError) throw updateError;
+
+          // Notify on password change
+          const { notificationService } = await import('../services/notificationService');
+          await notificationService.notify(user.id, 'password_change', 'Your password was successfully updated.');
+
+          // Log to audit log
+          const { auditService } = await import('../services/auditService');
+          await auditService.log(user.id, 'password_change', {
+            timestamp: new Date().toISOString()
+          });
+
+          setPasswordSuccess(true);
+          setNewPassword('');
+          setConfirmPassword('');
+          setShowOtpModal(false);
+          setOtpCode('');
+          setPendingAction(null);
+          setTimeout(() => setPasswordSuccess(false), 3000);
+        }
+      } else {
+        setOtpError('Invalid or expired security code');
+      }
+    } catch (err: any) {
+      setOtpError(err.message || 'Verification failed');
+    } finally {
+      setOtpLoading(false);
     }
   };
 
@@ -488,38 +607,70 @@ export default function Profile() {
               <p className="text-xs text-slate-400 mt-1">Upload ID or proof of address for verification.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {documents.map((doc) => (
-                <div key={doc.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 group">
-                  <div className="flex items-center gap-3 overflow-hidden">
-                    <div className="h-10 w-10 bg-white rounded-lg flex items-center justify-center border border-slate-200 flex-shrink-0">
-                      <FileText className="h-5 w-5 text-slate-400" />
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {documents.map((doc) => (
+                  <div key={doc.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 group">
+                    <div className="flex items-center gap-3 overflow-hidden">
+                      <div className="h-10 w-10 bg-white rounded-lg flex items-center justify-center border border-slate-200 flex-shrink-0">
+                        <FileText className="h-5 w-5 text-slate-400" />
+                      </div>
+                      <div className="overflow-hidden">
+                        <p className="text-sm font-bold text-slate-900 truncate">{doc.file_name}</p>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                          {new Date(doc.created_at).toLocaleDateString()}
+                        </p>
+                      </div>
                     </div>
-                    <div className="overflow-hidden">
-                      <p className="text-sm font-bold text-slate-900 truncate">{doc.file_name}</p>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                        {new Date(doc.created_at).toLocaleDateString()}
-                      </p>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={() => handleDownloadDocument(doc.file_path)}
+                        className="p-2 text-slate-400 hover:text-[#007856] transition-colors"
+                        title="Download"
+                      >
+                        <Download className="h-4 w-4" />
+                      </button>
+                      <button 
+                        onClick={() => handleDeleteDocument(doc)}
+                        className="p-2 text-slate-400 hover:text-red-600 transition-colors"
+                        title="Delete"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button 
-                      onClick={() => handleDownloadDocument(doc.file_path)}
-                      className="p-2 text-slate-400 hover:text-[#007856] transition-colors"
-                      title="Download"
-                    >
-                      <Download className="h-4 w-4" />
-                    </button>
-                    <button 
-                      onClick={() => handleDeleteDocument(doc)}
-                      className="p-2 text-slate-400 hover:text-red-600 transition-colors"
-                      title="Delete"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                ))}
+              </div>
+
+              {user?.kyc_status === 'unverified' && (
+                <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center gap-2 text-amber-600">
+                    <AlertCircle className="h-4 w-4" />
+                    <span className="text-xs font-medium">Your account is not yet verified.</span>
                   </div>
+                  <button
+                    onClick={handleSubmitKyc}
+                    disabled={kycLoading || documents.length === 0}
+                    className="w-full sm:w-auto px-6 py-2 bg-[#007856] text-white text-sm font-bold rounded-lg hover:bg-[#006045] transition-all shadow-lg shadow-emerald-100 disabled:opacity-50"
+                  >
+                    {kycLoading ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : 'Submit for Verification'}
+                  </button>
                 </div>
-              ))}
+              )}
+
+              {user?.kyc_status === 'pending' && (
+                <div className="pt-4 border-t border-slate-100 flex items-center gap-2 text-blue-600 bg-blue-50 p-3 rounded-xl">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-xs font-bold uppercase tracking-wider">Verification in Progress</span>
+                </div>
+              )}
+
+              {user?.kyc_status === 'verified' && (
+                <div className="pt-4 border-t border-slate-100 flex items-center gap-2 text-emerald-600 bg-emerald-50 p-3 rounded-xl">
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span className="text-xs font-bold uppercase tracking-wider">Account Verified</span>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -594,6 +745,120 @@ export default function Profile() {
               </button>
             </div>
           </form>
+        </div>
+      </div>
+      {/* OTP Modal */}
+      {showOtpModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-100">
+            <div className="bg-[#007856] p-6 text-white flex items-center gap-3">
+              <Shield className="h-6 w-6 text-[#FFB612]" />
+              <h3 className="text-lg font-bold">Security Verification</h3>
+            </div>
+            <div className="p-8">
+              <p className="text-sm text-slate-600 mb-6">
+                For your security, please enter the 6-digit code sent to your registered device to confirm this action.
+              </p>
+
+              <form onSubmit={handleVerifyOtp} className="space-y-6">
+                {otpError && (
+                  <div className="bg-red-50 border border-red-100 p-3 rounded-xl flex items-center gap-2 text-red-600 text-xs font-medium">
+                    <AlertCircle className="w-4 h-4" />
+                    {otpError}
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Verification Code</label>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                    className="w-full bg-slate-50 border-none rounded-2xl py-4 text-center text-3xl font-bold tracking-[0.5em] focus:ring-2 focus:ring-[#007856]/20"
+                    placeholder="000000"
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowOtpModal(false);
+                      setOtpCode('');
+                      setOtpError('');
+                    }}
+                    className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={otpLoading || otpCode.length !== 6}
+                    className="flex-[2] py-3 bg-[#007856] text-white font-bold rounded-xl hover:bg-[#006045] transition-all shadow-lg shadow-emerald-100 disabled:opacity-50"
+                  >
+                    {otpLoading ? <Loader2 className="h-5 w-5 animate-spin mx-auto" /> : 'Confirm Action'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmModal
+        isOpen={isConfirmOpen}
+        onClose={() => setIsConfirmOpen(false)}
+        onConfirm={confirmDeleteDoc}
+        title="Delete Document"
+        message="Are you sure you want to permanently delete this document? This action cannot be undone."
+        confirmText="Delete Document"
+      />
+
+      {/* Security History */}
+      <div className="mt-8 bg-white shadow-sm rounded-3xl border border-slate-100 overflow-hidden">
+        <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <History className="h-5 w-5 text-slate-400" />
+            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Security History</h3>
+          </div>
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Last 10 Actions</p>
+        </div>
+        <div className="p-0">
+          {logsLoading ? (
+            <div className="p-12 flex justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-[#007856]" />
+            </div>
+          ) : auditLogs.length === 0 ? (
+            <div className="p-12 text-center">
+              <p className="text-sm text-slate-500">No security history found.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-50">
+              {auditLogs.map((log) => (
+                <div key={log.id} className="px-6 py-4 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
+                  <div className="flex items-center gap-4">
+                    <div className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center">
+                      <Shield className="h-4 w-4 text-slate-400" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                        {log.action.replace(/_/g, ' ')}
+                      </p>
+                      <p className="text-[10px] text-slate-500 font-medium">
+                        {format(new Date(log.created_at), 'MMM dd, yyyy • hh:mm a')}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest bg-emerald-50 text-emerald-600">
+                      Success
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

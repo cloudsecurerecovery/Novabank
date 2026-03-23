@@ -18,7 +18,11 @@ export type AuditAction =
   | 'deposit'
   | 'wire_transfer'
   | 'admin_profile_update'
-  | 'admin_otp_sent';
+  | 'otp_sent'
+  | 'otp_verified'
+  | 'admin_otp_sent'
+  | 'kyc_submission'
+  | 'admin_balance_adjustment';
 
 export interface AuditLog {
   id: string;

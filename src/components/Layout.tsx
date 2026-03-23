@@ -1,6 +1,6 @@
 import { Link, useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { Building2, LogOut, LayoutDashboard, UserCircle, Users, MessageSquare, DollarSign, Clock, Menu, X, Shield, ArrowDownLeft, Globe, Bell, CreditCard } from 'lucide-react';
+import { Building2, LogOut, LayoutDashboard, UserCircle, MessageSquare, DollarSign, Clock, Menu, X, ArrowDownLeft, Globe, Bell, CreditCard, Shield, Users, History, Settings } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { AvatarImage } from './AvatarImage';
@@ -68,29 +68,38 @@ export default function Layout() {
     };
   }, [user]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (user) {
+      const { auditService } = await import('../services/auditService');
+      await auditService.log(user.id, 'logout', {
+        timestamp: new Date().toISOString()
+      });
+    }
     logout();
     navigate('/login');
   };
 
-  const navItems = user?.is_admin 
-    ? [
-        { name: 'Overview', path: '/admin/dashboard', icon: LayoutDashboard },
-        { name: 'Users', path: '/admin/users', icon: Users },
-        { name: 'Transactions', path: '/admin/transactions', icon: Building2 },
-        { name: 'Support Chat', path: '/admin/chat', icon: MessageSquare },
-        { name: 'Audit Logs', path: '/admin/audit', icon: Shield },
-      ]
-    : [
-        { name: 'Accounts', path: '/dashboard', icon: Building2 },
-        { name: 'Transactions', path: '/transactions', icon: Clock },
-        { name: 'Cards', path: '/cards', icon: CreditCard },
-        { name: 'Transfer', path: '/transfer', icon: DollarSign },
-        { name: 'Deposit', path: '/deposit', icon: ArrowDownLeft },
-        { name: 'Wire', path: '/wire-transfer', icon: Globe },
-        { name: 'Support', path: '/support', icon: MessageSquare },
-        { name: 'Profile', path: '/profile', icon: UserCircle },
-      ];
+  const navItems = [
+    { name: 'Accounts', path: '/dashboard', icon: Building2 },
+    { name: 'Transactions', path: '/transactions', icon: Clock },
+    { name: 'Cards', path: '/cards', icon: CreditCard },
+    { name: 'Transfer', path: '/transfer', icon: DollarSign },
+    { name: 'Deposit', path: '/deposit', icon: ArrowDownLeft },
+    { name: 'Wire', path: '/wire-transfer', icon: Globe },
+    { name: 'Support', path: '/support', icon: MessageSquare },
+    { name: 'Profile', path: '/profile', icon: UserCircle },
+  ];
+
+  const adminItems = [
+    { name: 'Admin Hub', path: '/admin', icon: Shield },
+    { name: 'Users', path: '/admin/users', icon: Users },
+    { name: 'Audit Logs', path: '/admin/audit', icon: History },
+    { name: 'Support', path: '/admin/support', icon: MessageSquare },
+    { name: 'Broadcast', path: '/admin/notifications', icon: Bell },
+    { name: 'Settings', path: '/admin/settings', icon: Settings },
+  ];
+
+  const allNavItems = user?.is_admin ? [...navItems, ...adminItems] : navItems;
 
   return (
     <div className="min-h-screen bg-[#F4F6F8] flex flex-col font-sans">
@@ -105,14 +114,14 @@ export default function Layout() {
             </div>
 
             {/* Desktop Navigation */}
-            <nav className="hidden md:flex items-center space-x-8">
-              {navItems.map((item) => {
-                const isActive = location.pathname === item.path || (item.path === '/admin' && location.pathname === '/admin');
+            <nav className="hidden md:flex items-center space-x-6">
+              {allNavItems.map((item) => {
+                const isActive = location.pathname === item.path;
                 return (
                   <Link
                     key={item.name}
                     to={item.path}
-                    className={`text-sm font-medium transition-colors hover:text-[#FFB612] ${
+                    className={`text-xs lg:text-sm font-medium transition-colors hover:text-[#FFB612] ${
                       isActive ? 'text-[#FFB612] border-b-2 border-[#FFB612] pb-1' : 'text-white'
                     }`}
                   >
@@ -143,11 +152,6 @@ export default function Layout() {
                   />
                 </div>
                 <span className="text-sm font-medium">Welcome, {user?.full_name?.split(' ')[0]}</span>
-                {user?.is_admin && (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-[#FFB612] text-[#007856]">
-                    Admin
-                  </span>
-                )}
               </div>
               <button 
                 onClick={handleLogout} 
@@ -174,7 +178,7 @@ export default function Layout() {
         {isMobileMenuOpen && (
           <div className="md:hidden bg-[#006045] border-t border-[#007856]">
             <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
-              {navItems.map((item) => {
+              {allNavItems.map((item) => {
                 const isActive = location.pathname === item.path;
                 return (
                   <Link
@@ -212,14 +216,14 @@ export default function Layout() {
       </main>
 
       {/* Bottom Navigation for Mobile */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-6 py-3 flex justify-between items-center z-50 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
-        {navItems.map((item) => {
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-4 py-3 flex justify-between items-center z-50 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] overflow-x-auto">
+        {allNavItems.slice(0, 5).map((item) => {
           const isActive = location.pathname === item.path;
           return (
             <Link
               key={item.name}
               to={item.path}
-              className={`flex flex-col items-center gap-1 transition-colors ${
+              className={`flex flex-col items-center gap-1 transition-colors min-w-[60px] ${
                 isActive ? 'text-[#007856]' : 'text-slate-400'
               }`}
             >

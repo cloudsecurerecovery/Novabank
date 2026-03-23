@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
+import ConfirmModal from '../components/ConfirmModal';
 
 interface Card {
   id: string;
@@ -34,6 +35,8 @@ export default function Cards() {
   const [loading, setLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
   const [showNumbers, setShowNumbers] = useState<Record<string, boolean>>({});
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [cardToDelete, setCardToDelete] = useState<string | null>(null);
   
   // New Card Form
   const [newCardType, setNewCardType] = useState<'debit' | 'credit'>('debit');
@@ -120,21 +123,28 @@ export default function Cards() {
   };
 
   const deleteCard = async (cardId: string) => {
-    if (!window.confirm('Are you sure you want to permanently delete this card?')) return;
+    setCardToDelete(cardId);
+    setIsConfirmOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!cardToDelete) return;
     
     try {
       const { error } = await supabase
         .from('cards')
         .delete()
-        .eq('id', cardId);
+        .eq('id', cardToDelete);
 
       if (error) throw error;
       
-      setCards(cards.filter(c => c.id !== cardId));
+      setCards(cards.filter(c => c.id !== cardToDelete));
       toast.success('Card deleted');
     } catch (err) {
       console.error('Error deleting card:', err);
       toast.error('Failed to delete card');
+    } finally {
+      setCardToDelete(null);
     }
   };
 
@@ -362,6 +372,15 @@ export default function Cards() {
           </div>
         </div>
       </div>
+      
+      <ConfirmModal
+        isOpen={isConfirmOpen}
+        onClose={() => setIsConfirmOpen(false)}
+        onConfirm={confirmDelete}
+        title="Delete Card"
+        message="Are you sure you want to permanently delete this card? This action cannot be undone."
+        confirmText="Delete Card"
+      />
     </div>
   );
 }
