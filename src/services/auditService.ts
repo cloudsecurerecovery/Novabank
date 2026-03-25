@@ -2,7 +2,10 @@ import { supabase } from '../supabaseClient';
 
 export type AuditAction = 
   | 'login' 
+  | 'admin_login'
   | 'logout' 
+  | 'failed_login_attempt'
+  | 'unauthorized_access'
   | 'transfer_sent' 
   | 'transfer_received' 
   | 'profile_update' 
@@ -12,6 +15,7 @@ export type AuditAction =
   | 'admin_bulk_deposit'
   | 'admin_transaction_create'
   | 'admin_notification' 
+  | 'admin_broadcast'
   | 'transaction_status_change'
   | 'password_change'
   | 'registration'
@@ -22,7 +26,18 @@ export type AuditAction =
   | 'otp_verified'
   | 'admin_otp_sent'
   | 'kyc_submission'
-  | 'admin_balance_adjustment';
+  | 'admin_balance_adjustment'
+  | 'admin_role_update'
+  | 'admin_status_update'
+  | 'admin_kyc_update'
+  | 'admin_user_delete'
+  | 'admin_password_reset_sent'
+  | 'system_settings_update'
+  | 'currency_rate_update'
+  | 'loan_application_update'
+  | 'admin_update_loan'
+  | 'savings_goal_update'
+  | 'recurring_payment_processed';
 
 export interface AuditLog {
   id: string;

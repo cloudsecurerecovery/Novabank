@@ -12,10 +12,14 @@ import {
   RefreshCw,
   X,
   Plus,
-  Trash2
+  Trash2,
+  Globe
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'react-hot-toast';
+import { format } from 'date-fns';
+import { auditService } from '../../services/auditService';
+import { useAuthStore } from '../../store/authStore';
 
 interface SystemSetting {
   key: string;
@@ -24,12 +28,12 @@ interface SystemSetting {
 }
 
 export default function AdminSettings() {
+  const { user: currentUser } = useAuthStore();
   const [settings, setSettings] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   // Advanced Modals
-  const [showRatesModal, setShowRatesModal] = useState(false);
   const [showFraudModal, setShowFraudModal] = useState(false);
   const [showAutoVerifyModal, setShowAutoVerifyModal] = useState(false);
   const [exchangeRates, setExchangeRates] = useState<any[]>([]);
@@ -47,6 +51,16 @@ export default function AdminSettings() {
           rate: newRate.rate 
         }]);
       if (error) throw error;
+      
+      if (currentUser) {
+        await auditService.log(currentUser.id, 'currency_rate_update', {
+          action: 'add',
+          from: newRate.from.toUpperCase(),
+          to: newRate.to.toUpperCase(),
+          rate: newRate.rate
+        });
+      }
+
       toast.success('Rate pair added');
       setNewRate({ from: '', to: '', rate: 1 });
       fetchRates();
@@ -56,12 +70,23 @@ export default function AdminSettings() {
   };
 
   const handleDeleteRate = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this exchange rate?')) return;
     try {
+      const { data: oldRate } = await supabase.from('exchange_rates').select('*').eq('id', id).single();
       const { error } = await supabase
         .from('exchange_rates')
         .delete()
         .eq('id', id);
       if (error) throw error;
+
+      if (currentUser && oldRate) {
+        await auditService.log(currentUser.id, 'currency_rate_update', {
+          action: 'delete',
+          from: oldRate.from_currency,
+          to: oldRate.to_currency
+        });
+      }
+
       toast.success('Rate pair deleted');
       fetchRates();
     } catch (err: any) {
@@ -71,6 +96,7 @@ export default function AdminSettings() {
 
   useEffect(() => {
     fetchSettings();
+    fetchRates();
   }, []);
 
   const fetchSettings = async () => {
@@ -111,13 +137,25 @@ export default function AdminSettings() {
     }
   };
 
-  const handleUpdateRate = async (id: string, newRate: number) => {
+  const handleUpdateRate = async (id: string, newRateVal: number) => {
     try {
+      const { data: oldRate } = await supabase.from('exchange_rates').select('*').eq('id', id).single();
       const { error } = await supabase
         .from('exchange_rates')
-        .update({ rate: newRate, updated_at: new Date().toISOString() })
+        .update({ rate: newRateVal, updated_at: new Date().toISOString() })
         .eq('id', id);
       if (error) throw error;
+
+      if (currentUser && oldRate) {
+        await auditService.log(currentUser.id, 'currency_rate_update', {
+          action: 'update',
+          from: oldRate.from_currency,
+          to: oldRate.to_currency,
+          old_rate: oldRate.rate,
+          new_rate: newRateVal
+        });
+      }
+
       toast.success('Rate updated');
       fetchRates();
     } catch (err: any) {
@@ -143,6 +181,13 @@ export default function AdminSettings() {
         .upsert(updates);
 
       if (error) throw error;
+
+      if (currentUser) {
+        await auditService.log(currentUser.id, 'system_settings_update', {
+          updated_keys: Object.keys(settings)
+        });
+      }
+
       toast.success('Settings updated successfully');
     } catch (err) {
       console.error('Error saving settings:', err);
@@ -335,7 +380,10 @@ export default function AdminSettings() {
             </div>
             <p className="text-xs text-slate-500 font-medium leading-relaxed">Manage real-time exchange rates for international wires.</p>
             <button 
-              onClick={() => { setShowRatesModal(true); fetchRates(); }}
+              onClick={() => { 
+                const el = document.getElementById('exchange-rates-section');
+                el?.scrollIntoView({ behavior: 'smooth' });
+              }}
               className="w-full py-2 bg-white border border-slate-200 rounded-lg text-[10px] font-bold uppercase tracking-widest text-slate-600 hover:bg-slate-100 transition-all"
             >
               Manage Rates
@@ -358,91 +406,122 @@ export default function AdminSettings() {
         </div>
       </div>
 
-      {/* Exchange Rates Modal */}
-      {showRatesModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-[32px] p-8 w-full max-w-2xl max-h-[80vh] overflow-y-auto"
-          >
-            <div className="flex items-center justify-between mb-8">
-              <h2 className="text-2xl font-bold text-slate-900">Exchange Rates</h2>
-              <button onClick={() => setShowRatesModal(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-                <X className="w-6 h-6 text-slate-400" />
-              </button>
+      {/* Currency Exchange Rates Section */}
+      <div className="bg-white rounded-[32px] p-8 border border-slate-100 shadow-sm space-y-8">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-blue-50 rounded-2xl">
+              <Globe className="w-6 h-6 text-blue-600" />
             </div>
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">Currency Exchange Rates</h2>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">Manage rates for international transfers and multi-currency accounts.</p>
+            </div>
+          </div>
+          <button 
+            onClick={fetchRates}
+            className="p-2 text-slate-400 hover:text-blue-600 transition-colors"
+            title="Refresh Rates"
+          >
+            <RefreshCw className={`w-5 h-5 ${ratesLoading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
 
-            <div className="space-y-4">
-              {ratesLoading ? (
-                <div className="flex justify-center py-12">
-                  <Loader2 className="w-8 h-8 animate-spin text-[#007856]" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-4">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Active Rate Pairs</p>
+            <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+              {ratesLoading && exchangeRates.length === 0 ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
                 </div>
-              ) : exchangeRates.map((rate) => (
-                <div key={rate.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center font-bold text-[#007856] shadow-sm">
-                      {rate.from_currency}
+              ) : exchangeRates.length === 0 ? (
+                <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                  <p className="text-sm text-slate-400 font-medium">No exchange rates configured.</p>
+                </div>
+              ) : (
+                exchangeRates.map((rate) => (
+                  <div key={rate.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-blue-100 transition-all">
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center -space-x-2">
+                        <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center font-bold text-xs text-[#007856] shadow-sm border border-slate-100">
+                          {rate.from_currency}
+                        </div>
+                        <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center font-bold text-xs text-blue-600 shadow-sm border border-slate-100">
+                          {rate.to_currency}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-slate-900">{rate.from_currency}/{rate.to_currency}</p>
+                        <p className="text-[10px] text-slate-400 font-medium">Last updated: {format(new Date(rate.updated_at || rate.created_at), 'MMM dd, HH:mm')}</p>
+                      </div>
                     </div>
-                    <ArrowRightLeft className="w-4 h-4 text-slate-300" />
-                    <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center font-bold text-blue-600 shadow-sm">
-                      {rate.to_currency}
+                    <div className="flex items-center gap-3">
+                      <input 
+                        type="number"
+                        step="0.0001"
+                        defaultValue={rate.rate}
+                        onBlur={(e) => handleUpdateRate(rate.id, Number(e.target.value))}
+                        className="w-24 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold focus:ring-2 focus:ring-blue-500/20 transition-all"
+                      />
+                      <button 
+                        onClick={() => handleDeleteRate(rate.id)}
+                        className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <input 
-                      type="number"
-                      step="0.0001"
-                      defaultValue={rate.rate}
-                      onBlur={(e) => handleUpdateRate(rate.id, Number(e.target.value))}
-                      className="w-32 px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-[#007856]/20 transition-all"
-                    />
-                    <button 
-                      onClick={() => handleDeleteRate(rate.id)}
-                      className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-              
-              <div className="p-6 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 space-y-4">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Add New Exchange Pair</p>
-                <div className="grid grid-cols-3 gap-4">
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Add New Pair</p>
+            <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">From Currency</label>
                   <input 
-                    placeholder="FROM (USD)"
+                    placeholder="USD"
                     value={newRate.from}
                     onChange={e => setNewRate(prev => ({ ...prev, from: e.target.value }))}
-                    className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold uppercase"
-                  />
-                  <input 
-                    placeholder="TO (EUR)"
-                    value={newRate.to}
-                    onChange={e => setNewRate(prev => ({ ...prev, to: e.target.value }))}
-                    className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold uppercase"
-                  />
-                  <input 
-                    type="number"
-                    step="0.0001"
-                    placeholder="Rate"
-                    value={newRate.rate}
-                    onChange={e => setNewRate(prev => ({ ...prev, rate: Number(e.target.value) }))}
-                    className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold"
+                    className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold uppercase focus:ring-2 focus:ring-blue-500/20 transition-all"
                   />
                 </div>
-                <button 
-                  onClick={handleAddRate}
-                  className="w-full py-3 bg-[#007856] text-white rounded-xl font-bold hover:bg-[#006649] transition-all flex items-center justify-center gap-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add Pair
-                </button>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">To Currency</label>
+                  <input 
+                    placeholder="EUR"
+                    value={newRate.to}
+                    onChange={e => setNewRate(prev => ({ ...prev, to: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold uppercase focus:ring-2 focus:ring-blue-500/20 transition-all"
+                  />
+                </div>
               </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Exchange Rate</label>
+                <input 
+                  type="number"
+                  step="0.0001"
+                  placeholder="0.0000"
+                  value={newRate.rate}
+                  onChange={e => setNewRate(prev => ({ ...prev, rate: Number(e.target.value) }))}
+                  className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20 transition-all"
+                />
+              </div>
+              <button 
+                onClick={handleAddRate}
+                className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 flex items-center justify-center gap-2"
+              >
+                <Plus className="w-5 h-5" />
+                Add Exchange Pair
+              </button>
             </div>
-          </motion.div>
+          </div>
         </div>
-      )}
+      </div>
 
       {/* Auto-Verification Modal */}
       {showAutoVerifyModal && (

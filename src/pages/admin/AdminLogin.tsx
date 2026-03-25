@@ -4,6 +4,7 @@ import { Shield, Lock, Mail, XCircle, ArrowLeft } from 'lucide-react';
 import { supabase } from '../../supabaseClient';
 import { validateEmail } from '../../utils/validation';
 import { toast } from 'react-hot-toast';
+import { auditService } from '../../services/auditService';
 
 export default function AdminLogin() {
   const [email, setEmail] = useState('');
@@ -35,6 +36,14 @@ export default function AdminLogin() {
       });
 
       if (supabaseError) {
+        // Log failed login attempt
+        await auditService.log('system', 'failed_login_attempt', { 
+          email,
+          portal: 'admin',
+          error: supabaseError.message,
+          timestamp: new Date().toISOString()
+        });
+        
         // Special case for the provided admin credentials if they don't exist in Auth yet
         if (email === 'ositalan5@gmail.com' && password === 'Longlife@1355') {
           toast.success('Admin credentials recognized. Initializing secure session...');
@@ -56,9 +65,20 @@ export default function AdminLogin() {
         const isAdmin = profile?.is_admin || email === 'ositalan5@gmail.com';
 
         if (!isAdmin) {
+          await auditService.log(data.user.id, 'unauthorized_access', {
+            email: data.user.email,
+            portal: 'admin',
+            timestamp: new Date().toISOString()
+          });
           await supabase.auth.signOut();
           throw new Error('Access denied: This account does not have administrative privileges.');
         }
+
+        // Log successful admin login
+        await auditService.log(data.user.id, 'admin_login', { 
+          email: data.user.email,
+          timestamp: new Date().toISOString()
+        });
 
         toast.success('Admin access granted');
         navigate('/admin');

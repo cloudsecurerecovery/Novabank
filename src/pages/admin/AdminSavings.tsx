@@ -22,6 +22,8 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import { format } from 'date-fns';
+import { auditService } from '../../services/auditService';
+import { useAuthStore } from '../../store/authStore';
 
 interface SavingsGoal {
   id: string;
@@ -50,6 +52,7 @@ interface Contribution {
 }
 
 export default function AdminSavings() {
+  const { user: currentUser } = useAuthStore();
   const [goals, setGoals] = useState<SavingsGoal[]>([]);
   const [contributions, setContributions] = useState<Contribution[]>([]);
   const [loading, setLoading] = useState(true);
@@ -164,6 +167,14 @@ export default function AdminSavings() {
 
       if (error) throw error;
 
+      if (currentUser) {
+        await auditService.log(currentUser.id, 'savings_goal_update', {
+          goal_id: selectedGoal.id,
+          action: 'edit',
+          updates: editGoalData
+        });
+      }
+
       toast.success('Savings goal updated successfully');
       setIsEditModalOpen(false);
       fetchGoals();
@@ -185,6 +196,14 @@ export default function AdminSavings() {
         .eq('id', goalId);
 
       if (error) throw error;
+
+      if (currentUser) {
+        await auditService.log(currentUser.id, 'savings_goal_update', {
+          goal_id: goalId,
+          action: 'delete'
+        });
+      }
+
       toast.success('Savings goal deleted successfully');
       fetchGoals();
     } catch (err) {

@@ -21,6 +21,8 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import { format } from 'date-fns';
+import { auditService } from '../../services/auditService';
+import { useAuthStore } from '../../store/authStore';
 
 interface Loan {
   id: string;
@@ -52,6 +54,7 @@ interface Repayment {
 }
 
 export default function AdminLoans() {
+  const { user: currentUser } = useAuthStore();
   const [loans, setLoans] = useState<Loan[]>([]);
   const [repayments, setRepayments] = useState<Repayment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -129,18 +132,83 @@ export default function AdminLoans() {
 
   const handleAction = async (id: string, status: string) => {
     try {
-      const { error } = await supabase
-        .from('loans')
-        .update({ status })
-        .eq('id', id);
+      if (status === 'approved') {
+        // 1. Get loan details
+        const { data: loan, error: fetchError } = await supabase
+          .from('loans')
+          .select('*, profiles(balance)')
+          .eq('id', id)
+          .single();
 
-      if (error) throw error;
-      toast.success(`Loan application ${status}`);
+        if (fetchError) throw fetchError;
+        if (!loan) throw new Error('Loan not found');
+
+        // 2. Update loan status to 'active' and set remaining balance
+        const { error: loanError } = await supabase
+          .from('loans')
+          .update({ 
+            status: 'active',
+            remaining_balance: loan.amount,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', id);
+
+        if (loanError) throw loanError;
+
+        // 3. Increment user balance
+        const { error: balanceError } = await supabase
+          .from('profiles')
+          .update({ balance: (loan.profiles?.balance || 0) + loan.amount })
+          .eq('id', loan.user_id);
+
+        if (balanceError) throw balanceError;
+
+        // 4. Create transaction record
+        const { error: txError } = await supabase
+          .from('transactions')
+          .insert([{
+            user_id: loan.user_id,
+            amount: loan.amount,
+            description: `Loan Disbursement: ${loan.amount.toLocaleString()} USD`,
+            status: 'released',
+            type: 'credit'
+          }]);
+
+        if (txError) throw txError;
+
+        if (currentUser) {
+          await auditService.log(currentUser.id, 'loan_application_update', {
+            loan_id: id,
+            new_status: 'active',
+            amount: loan.amount,
+            action: 'approved_and_disbursed'
+          });
+        }
+
+        toast.success('Loan approved and funds disbursed');
+      } else {
+        const { error } = await supabase
+          .from('loans')
+          .update({ status })
+          .eq('id', id);
+
+        if (error) throw error;
+        
+        if (currentUser) {
+          await auditService.log(currentUser.id, 'loan_application_update', {
+            loan_id: id,
+            new_status: status
+          });
+        }
+
+        toast.success(`Loan application ${status}`);
+      }
+
       fetchLoans();
       setSelectedLoan(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error updating loan status:', err);
-      toast.error('Failed to update loan status');
+      toast.error(err.message || 'Failed to update loan status');
     }
   };
 
@@ -172,6 +240,14 @@ export default function AdminLoans() {
 
       if (error) throw error;
 
+      if (currentUser) {
+        await auditService.log(currentUser.id, 'admin_update_loan', {
+          loan_id: selectedLoan.id,
+          action: 'edit',
+          updates: editLoanData
+        });
+      }
+
       toast.success('Loan updated successfully');
       setIsEditModalOpen(false);
       fetchLoans();
@@ -193,6 +269,14 @@ export default function AdminLoans() {
         .eq('id', loanId);
 
       if (error) throw error;
+
+      if (currentUser) {
+        await auditService.log(currentUser.id, 'loan_application_update', {
+          loan_id: loanId,
+          action: 'delete'
+        });
+      }
+
       toast.success('Loan deleted successfully');
       fetchLoans();
     } catch (err) {

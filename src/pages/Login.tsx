@@ -48,6 +48,13 @@ export default function Login() {
       });
 
       if (supabaseError) {
+        // Log failed login attempt
+        const { auditService } = await import('../services/auditService');
+        await auditService.log('system', 'failed_login_attempt', { 
+          email,
+          error: supabaseError.message,
+          timestamp: new Date().toISOString()
+        });
         throw new Error(supabaseError.message);
       }
 

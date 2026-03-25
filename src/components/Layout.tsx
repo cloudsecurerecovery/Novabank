@@ -1,6 +1,6 @@
 import { Link, useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { Building2, LogOut, LayoutDashboard, UserCircle, MessageSquare, DollarSign, Clock, Menu, X, ArrowDownLeft, Globe, Bell, CreditCard, Shield, Users, History, Settings, PiggyBank, Banknote, Receipt, LineChart, Gift } from 'lucide-react';
+import { Building2, LogOut, LayoutDashboard, UserCircle, MessageSquare, DollarSign, Clock, Menu, X, ArrowDownLeft, Globe, Bell, CreditCard, Shield, Users, History, Settings, PiggyBank, Banknote, Receipt, LineChart, Gift, Loader2, ShieldAlert } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { AvatarImage } from './AvatarImage';
@@ -86,6 +86,11 @@ export default function Layout() {
     { name: 'Profile', path: '/profile', icon: UserCircle },
   ];
 
+  // Add Admin Portal link for admin users in regular view
+  if (user?.is_admin) {
+    navItems.push({ name: 'Admin Portal', path: '/admin', icon: Shield });
+  }
+
   const adminItems = [
     { name: 'Admin Hub', path: '/admin', icon: Shield },
     { name: 'Users', path: '/admin/users', icon: Users },
@@ -100,6 +105,78 @@ export default function Layout() {
 
   const isAdminPath = location.pathname.startsWith('/admin') && user?.is_admin;
   const allNavItems = isAdminPath ? adminItems : navItems;
+
+  const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
+  const [checkingMaintenance, setCheckingMaintenance] = useState(true);
+
+  useEffect(() => {
+    const checkMaintenance = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('system_settings')
+          .select('value')
+          .eq('key', 'maintenance_mode')
+          .single();
+        
+        if (!error && data) {
+          setIsMaintenanceMode(data.value === true);
+        }
+      } catch (err) {
+        console.error('Error checking maintenance mode:', err);
+      } finally {
+        setCheckingMaintenance(false);
+      }
+    };
+
+    checkMaintenance();
+
+    // Subscribe to changes in system_settings
+    const channel = supabase
+      .channel('system_settings_changes')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'system_settings', filter: 'key=eq.maintenance_mode' }, (payload) => {
+        setIsMaintenanceMode(payload.new.value === true);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  if (checkingMaintenance) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-[#007856]" />
+      </div>
+    );
+  }
+
+  if (isMaintenanceMode && !user?.is_admin) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
+        <div className="max-w-md w-full text-center space-y-8">
+          <div className="inline-flex p-6 bg-amber-500/10 rounded-[2.5rem] border border-amber-500/20">
+            <ShieldAlert className="w-16 h-16 text-amber-500" />
+          </div>
+          <div className="space-y-4">
+            <h1 className="text-4xl font-bold text-white tracking-tight">System Maintenance</h1>
+            <p className="text-slate-400 text-lg leading-relaxed">
+              NovaBank is currently undergoing scheduled maintenance to improve our services. We'll be back online shortly.
+            </p>
+          </div>
+          <div className="pt-8 border-t border-white/10">
+            <p className="text-slate-500 text-sm font-medium">Estimated time remaining: 45 minutes</p>
+          </div>
+          <button 
+            onClick={() => window.location.reload()}
+            className="w-full py-4 bg-white text-slate-900 font-bold rounded-2xl hover:bg-slate-100 transition-all"
+          >
+            Check Again
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#F4F6F8] flex flex-col font-sans">

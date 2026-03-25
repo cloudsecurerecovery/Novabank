@@ -31,6 +31,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import { format } from 'date-fns';
+import { auditService } from '../../services/auditService';
 
 interface UserProfile {
   id: string;
@@ -104,6 +105,14 @@ export default function AdminUsers() {
 
       if (error) throw error;
       
+      if (currentUser) {
+        await auditService.log(currentUser.id, 'admin_role_update', {
+          target_user_id: userId,
+          new_role: newRole,
+          is_admin: !currentState
+        });
+      }
+
       toast.success(`User role updated to ${newRole.charAt(0).toUpperCase() + newRole.slice(1)}`);
       fetchUsers();
       if (selectedUser?.id === userId) {
@@ -125,6 +134,13 @@ export default function AdminUsers() {
 
       if (error) throw error;
       
+      if (currentUser) {
+        await auditService.log(currentUser.id, 'admin_status_update', {
+          target_user_id: userId,
+          new_status: newStatus
+        });
+      }
+
       toast.success(`Account ${newStatus === 'frozen' ? 'frozen' : 'unfrozen'} successfully`);
       fetchUsers();
       if (selectedUser?.id === userId) {
@@ -145,6 +161,13 @@ export default function AdminUsers() {
 
       if (error) throw error;
       
+      if (currentUser) {
+        await auditService.log(currentUser.id, 'admin_kyc_update', {
+          target_user_id: userId,
+          new_status: status
+        });
+      }
+
       toast.success(`KYC status updated to ${status}`);
       fetchUsers();
       if (selectedUser?.id === userId) {
@@ -203,6 +226,13 @@ export default function AdminUsers() {
 
       if (error) throw error;
 
+      if (currentUser) {
+        await auditService.log(currentUser.id, 'admin_notification', {
+          target_user_id: selectedUser.id,
+          message: messageText.trim()
+        });
+      }
+
       toast.success('Message sent to user');
       setIsMessageModalOpen(false);
     } catch (err) {
@@ -245,6 +275,13 @@ export default function AdminUsers() {
 
       if (error) throw error;
 
+      if (currentUser) {
+        await auditService.log(currentUser.id, 'admin_profile_update', {
+          target_user_id: selectedUser.id,
+          updated_fields: editProfileData
+        });
+      }
+
       toast.success('User profile updated successfully');
       setIsEditProfileModalOpen(false);
       fetchUsers();
@@ -262,6 +299,13 @@ export default function AdminUsers() {
         redirectTo: `${window.location.origin}/reset-password`,
       });
       if (error) throw error;
+
+      if (currentUser) {
+        await auditService.log(currentUser.id, 'admin_password_reset_sent', {
+          target_email: email
+        });
+      }
+
       toast.success('Password reset email sent to user');
     } catch (err) {
       console.error('Error resetting password:', err);
@@ -281,6 +325,13 @@ export default function AdminUsers() {
         .eq('id', userId);
 
       if (error) throw error;
+
+      if (currentUser) {
+        await auditService.log(currentUser.id, 'admin_user_delete', {
+          target_user_id: userId
+        });
+      }
+
       toast.success('User account marked as deleted');
       fetchUsers();
     } catch (err) {
@@ -302,7 +353,6 @@ export default function AdminUsers() {
       if (error) throw error;
 
       // Log the action
-      const { auditService } = await import('../../services/auditService');
       if (currentUser) {
         await auditService.log(currentUser.id, 'admin_balance_adjustment', {
           target_user_id: selectedUser.id,

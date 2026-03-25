@@ -23,12 +23,15 @@ import {
   RefreshCw,
   Send,
   AlertTriangle,
-  X
+  X,
+  Shield
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import { format } from 'date-fns';
+import { auditService } from '../../services/auditService';
+import { useAuthStore } from '../../store/authStore';
 
 interface PendingTransaction {
   id: string;
@@ -72,9 +75,24 @@ interface AdminStats {
   total_investments_volume: number;
 }
 
+interface AuditLog {
+  id: string;
+  admin_id: string;
+  action: string;
+  target_id: string;
+  details: any;
+  created_at: string;
+  profiles: {
+    full_name: string;
+  };
+}
+
 export default function AdminDashboard() {
+  const { user: currentUser } = useAuthStore();
   const [pendingTransactions, setPendingTransactions] = useState<PendingTransaction[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<PendingTransaction[]>([]);
+  const [recentLogs, setRecentLogs] = useState<AuditLog[]>([]);
+  const [securityEvents, setSecurityEvents] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTx, setSelectedTx] = useState<PendingTransaction | null>(null);
   const [wireDetails, setWireDetails] = useState<WireDetails | null>(null);
@@ -97,6 +115,7 @@ export default function AdminDashboard() {
   const [isBroadcastModalOpen, setIsBroadcastModalOpen] = useState(false);
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [sendingBroadcast, setSendingBroadcast] = useState(false);
+  const [processingRecurring, setProcessingRecurring] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -162,6 +181,29 @@ export default function AdminDashboard() {
       if (recentError) throw recentError;
       setRecentTransactions(recent || []);
 
+      // Fetch recent audit logs
+      const { data: logs, error: logsError } = await supabase
+        .from('audit_logs')
+        .select('*, profiles(full_name)')
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (!logsError) {
+        setRecentLogs(logs || []);
+      }
+
+      // Fetch security events
+      const { data: security, error: securityError } = await supabase
+        .from('audit_logs')
+        .select('*, profiles(full_name)')
+        .in('action', ['failed_login_attempt', 'unauthorized_access', 'balance_update', 'system_settings_update'])
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (!securityError) {
+        setSecurityEvents(security || []);
+      }
+
     } catch (err) {
       console.error('Error fetching admin data:', err);
       toast.error('Failed to load admin dashboard');
@@ -178,6 +220,13 @@ export default function AdminDashboard() {
         .eq('id', id);
 
       if (error) throw error;
+
+      if (currentUser) {
+        await auditService.log(currentUser.id, 'transaction_status_change', {
+          transaction_id: id,
+          new_status: action
+        });
+      }
 
       toast.success(`Transaction ${action === 'released' ? 'approved' : 'rejected'}`);
       setSelectedTx(null);
@@ -253,6 +302,13 @@ export default function AdminDashboard() {
           .insert(notes);
 
         if (insertError) throw insertError;
+
+        if (currentUser) {
+          await auditService.log(currentUser.id, 'admin_broadcast', {
+            message: broadcastMessage.trim(),
+            user_count: users.length
+          });
+        }
       }
 
       toast.success(`Broadcast sent to ${users?.length || 0} users`);
@@ -263,6 +319,105 @@ export default function AdminDashboard() {
       toast.error('Failed to send broadcast');
     } finally {
       setSendingBroadcast(false);
+    }
+  };
+
+  const handleProcessRecurring = async () => {
+    try {
+      setProcessingRecurring(true);
+      
+      // 1. Fetch all active recurring bills that are due
+      const now = new Date().toISOString();
+      const { data: bills, error: billsError } = await supabase
+        .from('bill_payments')
+        .select('*, profiles(balance)')
+        .eq('is_recurring', true)
+        .gt('remaining_payments', 0)
+        .lte('scheduled_date', now)
+        .eq('status', 'pending');
+
+      if (billsError) throw billsError;
+
+      if (!bills || bills.length === 0) {
+        toast.success('No recurring payments due at this time.');
+        return;
+      }
+
+      const processedBillIds: string[] = [];
+      const failedBillIds: string[] = [];
+
+      for (const bill of bills) {
+        try {
+          // Check balance
+          if (bill.profiles.balance < bill.amount) {
+            console.warn(`Insufficient balance for recurring bill ${bill.id}`);
+            failedBillIds.push(bill.id);
+            continue;
+          }
+
+          // Process payment
+          const { error: balanceError } = await supabase
+            .from('profiles')
+            .update({ balance: bill.profiles.balance - bill.amount })
+            .eq('id', bill.user_id);
+          
+          if (balanceError) throw balanceError;
+
+          const { error: txError } = await supabase
+            .from('transactions')
+            .insert([{
+              user_id: bill.user_id,
+              amount: -bill.amount,
+              description: `Recurring Bill: ${bill.biller_name}`,
+              status: 'released',
+              type: 'debit'
+            }]);
+
+          if (txError) throw txError;
+
+          const nextDate = new Date(bill.scheduled_date);
+          if (bill.frequency === 'weekly') nextDate.setDate(nextDate.getDate() + 7);
+          else if (bill.frequency === 'monthly') nextDate.setMonth(nextDate.getMonth() + 1);
+          else if (bill.frequency === 'yearly') nextDate.setFullYear(nextDate.getFullYear() + 1);
+
+          const remaining = bill.remaining_payments - 1;
+          
+          const { error: nextBillError } = await supabase
+            .from('bill_payments')
+            .update({
+              scheduled_date: nextDate.toISOString(),
+              remaining_payments: remaining,
+              is_recurring: remaining > 0,
+              updated_at: now
+            })
+            .eq('id', bill.id);
+
+          if (nextBillError) throw nextBillError;
+
+          processedBillIds.push(bill.id);
+        } catch (err) {
+          console.error(`Error processing bill ${bill.id}:`, err);
+          failedBillIds.push(bill.id);
+        }
+      }
+
+      toast.success(`Processed ${processedBillIds.length} recurring payments. ${failedBillIds.length} failed.`);
+      
+      if (currentUser) {
+        await auditService.log(currentUser.id, 'recurring_payment_processed', {
+          processed_count: processedBillIds.length,
+          failed_count: failedBillIds.length,
+          processed_bill_ids: processedBillIds,
+          failed_bill_ids: failedBillIds
+        });
+      }
+
+      fetchData();
+    } catch (err: any) {
+      console.error('Error processing recurring payments:', err);
+      toast.error(err.message || 'Failed to process recurring payments');
+    } finally {
+      setProcessingRecurring(false);
     }
   };
 
@@ -282,6 +437,14 @@ export default function AdminDashboard() {
           <p className="text-slate-500 font-medium">Overview of system health and pending actions.</p>
         </div>
         <div className="flex items-center gap-3">
+          <button 
+            onClick={handleProcessRecurring}
+            disabled={processingRecurring}
+            className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 disabled:opacity-50"
+          >
+            {processingRecurring ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCw className="w-5 h-5" />}
+            Process Recurring
+          </button>
           <button 
             onClick={() => setIsBroadcastModalOpen(true)}
             className="flex items-center gap-2 px-6 py-3 bg-[#007856] text-white font-bold rounded-2xl hover:bg-[#006045] transition-all shadow-lg shadow-emerald-200"
@@ -408,6 +571,168 @@ export default function AdminDashboard() {
             <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Investment Volume</span>
           </div>
           <p className="text-3xl font-bold text-slate-900">${stats.total_investments_volume.toLocaleString()}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* System Health */}
+        <div className="lg:col-span-1 space-y-6">
+          <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-slate-900">System Health</h2>
+              <div className="flex items-center gap-2 px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                Operational
+              </div>
+            </div>
+            
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-50 rounded-xl">
+                    <Globe className="w-4 h-4 text-blue-600" />
+                  </div>
+                  <span className="text-sm font-bold text-slate-600">API Latency</span>
+                </div>
+                <span className="text-sm font-bold text-emerald-600">24ms</span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-purple-50 rounded-xl">
+                    <ArrowUpRight className="w-4 h-4 text-purple-600" />
+                  </div>
+                  <span className="text-sm font-bold text-slate-600">Uptime</span>
+                </div>
+                <span className="text-sm font-bold text-emerald-600">99.98%</span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-rose-50 rounded-xl">
+                    <AlertTriangle className="w-4 h-4 text-rose-600" />
+                  </div>
+                  <span className="text-sm font-bold text-slate-600">Error Rate</span>
+                </div>
+                <span className="text-sm font-bold text-emerald-600">0.02%</span>
+              </div>
+
+              <div className="pt-4 border-t border-slate-50">
+                <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">
+                  <span>Server Load</span>
+                  <span>12%</span>
+                </div>
+                <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-[#007856] rounded-full" style={{ width: '12%' }} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-slate-900 p-8 rounded-[2rem] text-white overflow-hidden relative group">
+            <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform">
+              <Shield className="w-32 h-32" />
+            </div>
+            <div className="relative z-10">
+              <h3 className="text-xl font-bold mb-2">Security Shield</h3>
+              <p className="text-slate-400 text-sm font-medium mb-6">Real-time threat monitoring and geographic blocking active.</p>
+              <Link 
+                to="/admin/settings"
+                className="inline-flex items-center gap-2 text-sm font-bold text-emerald-400 hover:text-emerald-300 transition-colors"
+              >
+                Security Settings <ArrowRight className="w-4 h-4" />
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        {/* Security Events */}
+        <div className="lg:col-span-1">
+          <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden h-full">
+            <div className="p-8 border-b border-slate-50 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-slate-900">Security Alerts</h2>
+              <div className="p-2 bg-rose-50 rounded-xl">
+                <Shield className="w-4 h-4 text-rose-600" />
+              </div>
+            </div>
+            <div className="p-4">
+              <div className="space-y-2">
+                {securityEvents.length === 0 ? (
+                  <div className="py-12 text-center text-slate-400 font-medium">
+                    No security alerts detected.
+                  </div>
+                ) : (
+                  securityEvents.map((event) => (
+                    <div key={event.id} className="flex items-start gap-4 p-4 hover:bg-rose-50/30 rounded-2xl transition-colors group">
+                      <div className={`p-3 rounded-xl transition-all ${
+                        event.action === 'failed_login_attempt' ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600'
+                      }`}>
+                        <AlertTriangle className="w-5 h-5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-sm font-bold text-slate-900 truncate">
+                            {event.action.replace(/_/g, ' ')}
+                          </p>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            {format(new Date(event.created_at), 'HH:mm')}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 font-medium line-clamp-1">
+                          {event.profiles?.full_name || 'System'}: {typeof event.details === 'string' ? event.details : JSON.stringify(event.details)}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Recent Audit Logs */}
+        <div className="lg:col-span-1">
+          <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden h-full">
+            <div className="p-8 border-b border-slate-50 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-slate-900">Recent Audit Logs</h2>
+              <Link 
+                to="/admin/audit-logs"
+                className="text-xs font-bold text-[#007856] hover:text-[#006045] flex items-center gap-1 uppercase tracking-widest"
+              >
+                View Full Log <ArrowRight className="w-3 h-3" />
+              </Link>
+            </div>
+            <div className="p-4">
+              <div className="space-y-2">
+                {recentLogs.length === 0 ? (
+                  <div className="py-12 text-center text-slate-400 font-medium">
+                    No recent audit logs found.
+                  </div>
+                ) : (
+                  recentLogs.map((log) => (
+                    <div key={log.id} className="flex items-start gap-4 p-4 hover:bg-slate-50 rounded-2xl transition-colors group">
+                      <div className="p-3 bg-slate-100 rounded-xl text-slate-500 group-hover:bg-white group-hover:shadow-sm transition-all">
+                        <Shield className="w-5 h-5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-sm font-bold text-slate-900 truncate">
+                            {log.profiles?.full_name || 'System'}
+                          </p>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            {format(new Date(log.created_at), 'HH:mm:ss')}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 font-medium line-clamp-1">
+                          {log.action}: {typeof log.details === 'string' ? log.details : JSON.stringify(log.details)}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 

@@ -17,6 +17,8 @@ import {
 import { motion } from 'framer-motion';
 import { format } from 'date-fns';
 import { toast } from 'react-hot-toast';
+import { auditService } from '../../services/auditService';
+import { useAuthStore } from '../../store/authStore';
 
 interface Transaction {
   id: string;
@@ -32,6 +34,7 @@ interface Transaction {
 }
 
 export default function AdminTransactions() {
+  const { user: currentUser } = useAuthStore();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -100,7 +103,7 @@ export default function AdminTransactions() {
     }
   };
 
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
     if (filteredTransactions.length === 0) {
       toast.error('No transactions to export');
       return;
@@ -129,6 +132,18 @@ export default function AdminTransactions() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    
+    if (currentUser) {
+      await auditService.log(currentUser.id, 'admin_transaction_create', {
+        action: 'export_csv',
+        record_count: filteredTransactions.length,
+        filters: {
+          search: searchTerm,
+          status: statusFilter
+        }
+      });
+    }
+
     toast.success('Transactions exported successfully');
   };
 

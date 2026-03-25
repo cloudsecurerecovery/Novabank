@@ -31,6 +31,10 @@ interface Bill {
   status: 'pending' | 'scheduled' | 'completed' | 'failed';
   scheduled_date: string;
   created_at: string;
+  is_recurring?: boolean;
+  frequency?: 'weekly' | 'monthly' | 'yearly';
+  duration?: number;
+  remaining_payments?: number;
 }
 
 const BillPay: React.FC = () => {
@@ -42,7 +46,10 @@ const BillPay: React.FC = () => {
     biller_name: '',
     account_number: '',
     amount: '',
-    scheduled_date: new Date()
+    scheduled_date: new Date(),
+    is_recurring: false,
+    frequency: 'monthly' as 'weekly' | 'monthly' | 'yearly',
+    duration: 12
   });
 
   useEffect(() => {
@@ -80,7 +87,11 @@ const BillPay: React.FC = () => {
           account_number: newBill.account_number,
           amount: parseFloat(newBill.amount),
           scheduled_date: new Date(newBill.scheduled_date).toISOString(),
-          status: 'scheduled'
+          status: 'scheduled',
+          is_recurring: newBill.is_recurring,
+          frequency: newBill.is_recurring ? newBill.frequency : null,
+          duration: newBill.is_recurring ? newBill.duration : null,
+          remaining_payments: newBill.is_recurring ? newBill.duration : null
         }]);
 
       if (error) throw error;
@@ -91,7 +102,10 @@ const BillPay: React.FC = () => {
         biller_name: '',
         account_number: '',
         amount: '',
-        scheduled_date: new Date()
+        scheduled_date: new Date(),
+        is_recurring: false,
+        frequency: 'monthly',
+        duration: 12
       });
       fetchBills();
     } catch (error: any) {
@@ -466,6 +480,60 @@ const BillPay: React.FC = () => {
                       />
                     </div>
                   </div>
+                </div>
+
+                <div className="p-6 bg-white/5 rounded-2xl border border-white/10 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-white">Recurring Payment</p>
+                      <p className="text-xs text-gray-400 font-medium">Automatically schedule future payments.</p>
+                    </div>
+                    <button 
+                      type="button"
+                      onClick={() => setNewBill(prev => ({ ...prev, is_recurring: !prev.is_recurring }))}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                        newBill.is_recurring ? 'bg-[#007856]' : 'bg-white/10'
+                      }`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        newBill.is_recurring ? 'translate-x-6' : 'translate-x-1'
+                      }`} />
+                    </button>
+                  </div>
+
+                  {newBill.is_recurring && (
+                    <motion.div 
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className="space-y-4 pt-4 border-t border-white/10"
+                    >
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Frequency</label>
+                          <select 
+                            value={newBill.frequency}
+                            onChange={(e) => setNewBill(prev => ({ ...prev, frequency: e.target.value as any }))}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-[#007856]"
+                          >
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                            <option value="yearly">Yearly</option>
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Duration (Payments)</label>
+                          <input 
+                            type="number"
+                            min="1"
+                            max="60"
+                            value={newBill.duration}
+                            onChange={(e) => setNewBill(prev => ({ ...prev, duration: Number(e.target.value) }))}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-[#007856]"
+                          />
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
                 </div>
 
                 <div className="pt-4 flex gap-4">
