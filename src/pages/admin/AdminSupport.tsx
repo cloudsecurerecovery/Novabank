@@ -85,37 +85,42 @@ export default function AdminSupport() {
 
   const fetchConversations = async () => {
     try {
-      // This is a bit complex in Supabase without a dedicated conversations view
-      // We'll fetch all messages where receiver_id is 'admin' or sender_id is an admin
+      // Fetch all messages involving 'admin'
       const { data, error } = await supabase
         .from('messages')
         .select(`
           *,
-          profiles:sender_id (
+          sender:sender_id (
+            id,
+            full_name,
+            email
+          ),
+          receiver:receiver_id (
             id,
             full_name,
             email
           )
         `)
+        .or('sender_id.eq.admin,receiver_id.eq.admin')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
 
-      // Group by user
       const conversationMap = new Map<string, Conversation>();
       
       data?.forEach(msg => {
-        const userId = msg.sender_id === adminUser?.id ? msg.receiver_id : msg.sender_id;
+        // The "other" person in the conversation is the one who isn't 'admin'
+        const userId = msg.sender_id === 'admin' ? msg.receiver_id : msg.sender_id;
         if (userId === 'admin' || !userId) return;
 
         if (!conversationMap.has(userId)) {
-          const profile = msg.sender_id === userId ? msg.profiles : null;
-          // If we don't have the profile yet, we might need to fetch it separately
-          // but for now let's assume we get it from the join
+          // Get profile info for the user
+          const profile = msg.sender_id === userId ? msg.sender : msg.receiver;
+          
           conversationMap.set(userId, {
             user_id: userId,
-            full_name: profile?.full_name || 'User',
-            email: profile?.email || 'user@novabank.com',
+            full_name: (profile as any)?.full_name || 'User',
+            email: (profile as any)?.email || 'user@novabank.com',
             last_message: msg.message,
             last_message_at: msg.created_at,
             unread_count: (msg.receiver_id === 'admin' && !msg.is_read) ? 1 : 0
@@ -148,7 +153,7 @@ export default function AdminSupport() {
             email
           )
         `)
-        .or(`and(sender_id.eq.${userId},receiver_id.eq.admin),and(sender_id.eq.${adminUser?.id},receiver_id.eq.${userId})`)
+        .or(`and(sender_id.eq.${userId},receiver_id.eq.admin),and(sender_id.eq.admin,receiver_id.eq.${userId})`)
         .order('created_at', { ascending: true });
 
       if (error) throw error;
@@ -177,7 +182,7 @@ export default function AdminSupport() {
       const { error } = await supabase
         .from('messages')
         .insert([{
-          sender_id: adminUser.id,
+          sender_id: 'admin', // Use 'admin' as sender_id for support replies
           receiver_id: selectedUserId,
           message: newMessage.trim(),
           is_read: false
@@ -185,7 +190,7 @@ export default function AdminSupport() {
 
       if (error) throw error;
       setNewMessage('');
-      fetchMessages(selectedUserId);
+      // Optimistically add message or let subscription handle it
     } catch (err) {
       console.error('Error sending message:', err);
       toast.error('Failed to send message');

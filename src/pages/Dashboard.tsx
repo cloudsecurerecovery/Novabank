@@ -101,16 +101,21 @@ Thank you for banking with NovaBank.
     if (!user) return;
     
     try {
-      // 1. Fetch Profile for latest balance
+      // 1. Fetch Profile for latest balances
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('balance')
+        .select('balance, savings_balance, loan_balance, investment_balance')
         .eq('id', user.id)
         .single();
 
       if (!profileError && profile) {
         setBalance(profile.balance || 0);
-        updateUser({ balance: profile.balance || 0 });
+        updateUser({ 
+          balance: profile.balance || 0,
+          savings_balance: profile.savings_balance || 0,
+          loan_balance: profile.loan_balance || 0,
+          investment_balance: profile.investment_balance || 0
+        });
       }
 
       // 2. Fetch transactions with documents
@@ -186,10 +191,16 @@ Thank you for banking with NovaBank.
       ]);
 
       setSummaries({
-        loans: loansRes.data?.reduce((acc, l) => acc + Number(l.remaining_balance), 0) || 0,
-        savings: savingsRes.data?.reduce((acc, s) => acc + Number(s.current_amount), 0) || 0,
+        loans: (profile?.loan_balance !== undefined && profile?.loan_balance !== null && profile?.loan_balance !== 0) 
+          ? profile.loan_balance 
+          : (loansRes.data?.reduce((acc, l) => acc + Number(l.remaining_balance), 0) || 0),
+        savings: (profile?.savings_balance !== undefined && profile?.savings_balance !== null && profile?.savings_balance !== 0)
+          ? profile.savings_balance
+          : (savingsRes.data?.reduce((acc, s) => acc + Number(s.current_amount), 0) || 0),
         bills: billsRes.data?.reduce((acc, b) => acc + Number(b.amount), 0) || 0,
-        investments: investmentsRes.data?.reduce((acc, i) => acc + (Number(i.quantity) * (Number(i.current_price) || Number(i.average_price))), 0) || 0
+        investments: (profile?.investment_balance !== undefined && profile?.investment_balance !== null && profile?.investment_balance !== 0)
+          ? profile.investment_balance
+          : (investmentsRes.data?.reduce((acc, i) => acc + (Number(i.quantity) * (Number(i.current_price) || Number(i.average_price))), 0) || 0)
       });
 
     } catch (error) {
@@ -213,9 +224,18 @@ Thank you for banking with NovaBank.
         table: 'profiles',
         filter: `id=eq.${user.id}`
       }, (payload) => {
+        const updates: any = {};
         if (payload.new.balance !== undefined) {
           setBalance(payload.new.balance);
-          updateUser({ balance: payload.new.balance });
+          updates.balance = payload.new.balance;
+        }
+        if (payload.new.savings_balance !== undefined) updates.savings_balance = payload.new.savings_balance;
+        if (payload.new.loan_balance !== undefined) updates.loan_balance = payload.new.loan_balance;
+        if (payload.new.investment_balance !== undefined) updates.investment_balance = payload.new.investment_balance;
+        
+        if (Object.keys(updates).length > 0) {
+          updateUser(updates);
+          fetchDashboardData();
         }
       })
       .subscribe();

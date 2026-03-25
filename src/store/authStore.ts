@@ -15,6 +15,9 @@ export interface User {
   otp_code?: string;
   otp_expires_at?: string;
   balance?: number;
+  savings_balance?: number;
+  loan_balance?: number;
+  investment_balance?: number;
 }
 
 interface AuthState {

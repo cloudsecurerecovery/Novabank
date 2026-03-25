@@ -26,7 +26,10 @@ import {
   ArrowDownLeft,
   Trash2,
   Key,
-  Edit3
+  Edit3,
+  Wallet,
+  Landmark,
+  LineChart
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
@@ -39,6 +42,9 @@ interface UserProfile {
   email: string;
   phone: string;
   balance: number;
+  savings_balance?: number;
+  loan_balance?: number;
+  investment_balance?: number;
   is_admin: boolean;
   role: string;
   account_status: string;
@@ -60,7 +66,11 @@ export default function AdminUsers() {
   const [userTransactions, setUserTransactions] = useState<any[]>([]);
   const [messageText, setMessageText] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [resettingPassword, setResettingPassword] = useState<string | null>(null);
   const [newBalance, setNewBalance] = useState<string>('');
+  const [newSavingsBalance, setNewSavingsBalance] = useState<string>('');
+  const [newLoanBalance, setNewLoanBalance] = useState<string>('');
+  const [newInvestmentBalance, setNewInvestmentBalance] = useState<string>('');
   const [adjustingBalance, setAdjustingBalance] = useState(false);
   const [txLoading, setTxLoading] = useState(false);
   const [editProfileData, setEditProfileData] = useState({
@@ -245,7 +255,10 @@ export default function AdminUsers() {
 
   const openEditBalance = (user: UserProfile) => {
     setSelectedUser(user);
-    setNewBalance(user.balance.toString());
+    setNewBalance((user.balance || 0).toString());
+    setNewSavingsBalance((user.savings_balance || 0).toString());
+    setNewLoanBalance((user.loan_balance || 0).toString());
+    setNewInvestmentBalance((user.investment_balance || 0).toString());
     setIsEditBalanceModalOpen(true);
   };
 
@@ -295,6 +308,7 @@ export default function AdminUsers() {
 
   const handleResetPassword = async (email: string) => {
     try {
+      setResettingPassword(email);
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: `${window.location.origin}/reset-password`,
       });
@@ -307,9 +321,11 @@ export default function AdminUsers() {
       }
 
       toast.success('Password reset email sent to user');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error resetting password:', err);
-      toast.error('Failed to send reset email');
+      toast.error(err.message || 'Failed to send reset email');
+    } finally {
+      setResettingPassword(null);
     }
   };
 
@@ -341,13 +357,20 @@ export default function AdminUsers() {
   };
 
   const handleUpdateBalance = async () => {
-    if (!selectedUser || isNaN(Number(newBalance))) return;
+    if (!selectedUser) return;
 
     try {
       setAdjustingBalance(true);
+      const updates = {
+        balance: Number(newBalance) || 0,
+        savings_balance: Number(newSavingsBalance) || 0,
+        loan_balance: Number(newLoanBalance) || 0,
+        investment_balance: Number(newInvestmentBalance) || 0
+      };
+
       const { error } = await supabase
         .from('profiles')
-        .update({ balance: Number(newBalance) })
+        .update(updates)
         .eq('id', selectedUser.id);
 
       if (error) throw error;
@@ -356,12 +379,17 @@ export default function AdminUsers() {
       if (currentUser) {
         await auditService.log(currentUser.id, 'admin_balance_adjustment', {
           target_user_id: selectedUser.id,
-          old_balance: selectedUser.balance,
-          new_balance: Number(newBalance)
+          old_balances: {
+            balance: selectedUser.balance,
+            savings: selectedUser.savings_balance,
+            loans: selectedUser.loan_balance,
+            investments: selectedUser.investment_balance
+          },
+          new_balances: updates
         });
       }
 
-      toast.success('Balance updated successfully');
+      toast.success('Balances updated successfully');
       setIsEditBalanceModalOpen(false);
       fetchUsers();
     } catch (err) {
@@ -481,10 +509,11 @@ export default function AdminUsers() {
                       </button>
                       <button 
                         onClick={() => handleResetPassword(user.email)}
-                        className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-xl transition-colors"
+                        disabled={resettingPassword === user.email}
+                        className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-xl transition-colors disabled:opacity-50"
                         title="Reset Password"
                       >
-                        <Key className="w-5 h-5" />
+                        {resettingPassword === user.email ? <Loader2 className="w-5 h-5 animate-spin" /> : <Key className="w-5 h-5" />}
                       </button>
                       <button 
                         onClick={() => openMessageModal(user)}
@@ -766,39 +795,61 @@ export default function AdminUsers() {
                     <p className="text-xs text-slate-500">{selectedUser.email}</p>
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">New Balance (USD)</label>
-                    <div className="relative">
-                      <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                      <input 
-                        type="number"
-                        value={newBalance}
-                        onChange={(e) => setNewBalance(e.target.value)}
-                        className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl text-lg font-bold focus:ring-2 focus:ring-[#007856]/20 transition-all"
-                        placeholder="0.00"
-                      />
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Checking Balance (USD)</label>
+                      <div className="relative">
+                        <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                        <input 
+                          type="number"
+                          value={newBalance}
+                          onChange={(e) => setNewBalance(e.target.value)}
+                          className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl text-lg font-bold focus:ring-2 focus:ring-[#007856]/20 transition-all"
+                          placeholder="0.00"
+                        />
+                      </div>
                     </div>
-                    <div className="flex gap-2 mt-2">
-                      {[100, 500, 1000, 5000].map(amount => (
-                        <button
-                          key={amount}
-                          onClick={() => setNewBalance((prev) => (Number(prev || 0) + amount).toString())}
-                          className="flex-1 py-2 bg-emerald-50 text-emerald-600 text-[10px] font-bold rounded-lg hover:bg-emerald-100 transition-colors"
-                        >
-                          +{amount}
-                        </button>
-                      ))}
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Savings Balance (USD)</label>
+                      <div className="relative">
+                        <Wallet className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                        <input 
+                          type="number"
+                          value={newSavingsBalance}
+                          onChange={(e) => setNewSavingsBalance(e.target.value)}
+                          className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl text-lg font-bold focus:ring-2 focus:ring-[#007856]/20 transition-all"
+                          placeholder="0.00"
+                        />
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      {[100, 500, 1000, 5000].map(amount => (
-                        <button
-                          key={amount}
-                          onClick={() => setNewBalance((prev) => Math.max(0, Number(prev || 0) - amount).toString())}
-                          className="flex-1 py-2 bg-rose-50 text-rose-600 text-[10px] font-bold rounded-lg hover:bg-rose-100 transition-colors"
-                        >
-                          -{amount}
-                        </button>
-                      ))}
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Loan Balance (USD)</label>
+                      <div className="relative">
+                        <Landmark className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                        <input 
+                          type="number"
+                          value={newLoanBalance}
+                          onChange={(e) => setNewLoanBalance(e.target.value)}
+                          className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl text-lg font-bold focus:ring-2 focus:ring-[#007856]/20 transition-all"
+                          placeholder="0.00"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Investment Balance (USD)</label>
+                      <div className="relative">
+                        <LineChart className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                        <input 
+                          type="number"
+                          value={newInvestmentBalance}
+                          onChange={(e) => setNewInvestmentBalance(e.target.value)}
+                          className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl text-lg font-bold focus:ring-2 focus:ring-[#007856]/20 transition-all"
+                          placeholder="0.00"
+                        />
+                      </div>
                     </div>
                   </div>
 

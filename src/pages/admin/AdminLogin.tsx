@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, Navigate } from 'react-router-dom';
 import { Shield, Lock, Mail, XCircle, ArrowLeft } from 'lucide-react';
 import { supabase } from '../../supabaseClient';
 import { validateEmail } from '../../utils/validation';
 import { toast } from 'react-hot-toast';
 import { auditService } from '../../services/auditService';
+import { useAuthStore } from '../../store/authStore';
 
 export default function AdminLogin() {
   const [email, setEmail] = useState('');
@@ -12,6 +13,16 @@ export default function AdminLogin() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { user, isAuthenticated } = useAuthStore();
+
+  // Redirect if already logged in
+  if (isAuthenticated) {
+    if (user?.is_admin) {
+      return <Navigate to="/admin" replace />;
+    } else {
+      return <Navigate to="/dashboard" replace />;
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

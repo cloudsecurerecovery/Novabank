@@ -36,7 +36,7 @@ export default function SupportChat() {
         const { data, error } = await supabase
           .from('messages')
           .select('*')
-          .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id},receiver_id.eq.admin,receiver_id.eq.admin-system`)
+          .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
           .order('created_at', { ascending: true });
 
         if (error) throw error;
@@ -50,31 +50,20 @@ export default function SupportChat() {
 
     fetchMessages();
 
-    // Subscribe to new messages
+    // Subscribe to new messages for this user
     const subscription = supabase
-      .channel('public:messages')
-      .on('postgres_changes', { 
-        event: 'INSERT', 
-        schema: 'public', 
-        table: 'messages',
-        filter: `sender_id=eq.${user.id}`
-      }, (payload) => {
-        // Only add if we didn't just add it optimistically
-        setMessages(prev => {
-          if (prev.find(m => m.id === payload.new.id)) return prev;
-          return [...prev, payload.new as ChatMessage];
-        });
-      })
+      .channel(`user-messages-${user.id}`)
       .on('postgres_changes', { 
         event: 'INSERT', 
         schema: 'public', 
         table: 'messages'
       }, (payload) => {
-        // Handle incoming messages from admin
-        if (payload.new.receiver_id === user.id) {
+        const newMessage = payload.new as ChatMessage;
+        // Only add if it's relevant to this user (sent by them or received by them)
+        if (newMessage.sender_id === user.id || newMessage.receiver_id === user.id) {
           setMessages(prev => {
-            if (prev.find(m => m.id === payload.new.id)) return prev;
-            return [...prev, payload.new as ChatMessage];
+            if (prev.find(m => m.id === newMessage.id)) return prev;
+            return [...prev, newMessage];
           });
         }
       })
@@ -97,23 +86,12 @@ export default function SupportChat() {
     setNewMessage('');
 
     try {
-      // Find an admin to send the message to
-      // In a real app, you might have a specific support queue or assigned agent
-      // For this demo, we'll just send it to the first admin we find, or a generic 'admin' ID if none exists
-      const { data: adminData } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('role', 'admin')
-        .limit(1)
-        .single();
-
-      const receiverId = adminData?.id || 'admin-system';
-
+      // Standardize receiver_id to 'admin' for support messages
       const { error } = await supabase
         .from('messages')
         .insert([{
           sender_id: user.id,
-          receiver_id: receiverId,
+          receiver_id: 'admin',
           message: messageText
         }]);
 
@@ -121,7 +99,6 @@ export default function SupportChat() {
       
     } catch (error) {
       console.error('Error sending message:', error);
-      // Optionally restore the message text if sending failed
       setNewMessage(messageText);
     }
   };

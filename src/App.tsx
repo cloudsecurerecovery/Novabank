@@ -103,6 +103,9 @@ export default function App() {
           avatar_url: signedAvatarUrl,
           phone: data.phone,
           balance: data.balance || 0,
+          savings_balance: data.savings_balance || 0,
+          loan_balance: data.loan_balance || 0,
+          investment_balance: data.investment_balance || 0,
         });
       } else {
         login({
