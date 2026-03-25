@@ -372,16 +372,10 @@ export default function Profile() {
     setPasswordLoading(true);
 
     try {
-      // Trigger OTP for password change
-      const { error: otpGenError } = await supabase.rpc('generate_otp', {
-        target_user_id: user.id
-      });
-      if (otpGenError) throw otpGenError;
-
       setPendingAction('password');
       setShowOtpModal(true);
     } catch (err: any) {
-      setPasswordError(err.message || 'Failed to initiate security verification');
+      setPasswordError(err.message || 'An error occurred. Please try again.');
     } finally {
       setPasswordLoading(false);
     }
@@ -395,14 +389,16 @@ export default function Profile() {
     setOtpError('');
 
     try {
-      const { data: verified, error: verifyError } = await supabase.rpc('verify_otp', {
-        target_user_id: user.id,
-        input_otp: otpCode
-      });
+      // Fetch the portal code from profile
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('otp_code')
+        .eq('id', user.id)
+        .single();
 
-      if (verifyError) throw verifyError;
+      if (profileError) throw profileError;
 
-      if (verified) {
+      if (profile?.otp_code === otpCode) {
         if (pendingAction === 'password') {
           const { error: updateError } = await supabase.auth.updateUser({
             password: newPassword
@@ -429,7 +425,7 @@ export default function Profile() {
           setTimeout(() => setPasswordSuccess(false), 3000);
         }
       } else {
-        setOtpError('Invalid or expired security code');
+        setOtpError('Invalid Portal Code. Please try again.');
       }
     } catch (err: any) {
       setOtpError(err.message || 'Verification failed');
@@ -753,11 +749,11 @@ export default function Profile() {
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-100">
             <div className="bg-[#007856] p-6 text-white flex items-center gap-3">
               <Shield className="h-6 w-6 text-[#FFB612]" />
-              <h3 className="text-lg font-bold">Security Verification</h3>
+              <h3 className="text-lg font-bold">Portal Access Verification</h3>
             </div>
             <div className="p-8">
               <p className="text-sm text-slate-600 mb-6">
-                For your security, please enter the 6-digit code sent to your registered device to confirm this action.
+                For your security, please enter your 6-digit Portal Code to confirm this sensitive action.
               </p>
 
               <form onSubmit={handleVerifyOtp} className="space-y-6">
@@ -769,7 +765,7 @@ export default function Profile() {
                 )}
 
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Verification Code</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Portal Code</label>
                   <input
                     type="text"
                     maxLength={6}

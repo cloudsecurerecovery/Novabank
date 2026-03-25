@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
   amount NUMERIC NOT NULL,
-  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'hold', 'released', 'failed', 'reversible')),
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'hold', 'released', 'failed', 'reversible', 'rejected', 'completed')),
   description TEXT,
   admin_notes TEXT,
   resulting_balance NUMERIC,
@@ -625,6 +625,35 @@ CREATE TABLE IF NOT EXISTS wire_transfer_details (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
 );
 
+-- 14. Loans Table
+CREATE TABLE IF NOT EXISTS loans (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  amount NUMERIC NOT NULL,
+  interest_rate NUMERIC DEFAULT 5.5,
+  term_months INTEGER NOT NULL,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'active', 'paid', 'defaulted')),
+  monthly_payment NUMERIC,
+  remaining_balance NUMERIC,
+  next_payment_date TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
+);
+
+-- 15. Savings Goals Table
+CREATE TABLE IF NOT EXISTS savings_goals (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  target_amount NUMERIC NOT NULL,
+  current_amount NUMERIC DEFAULT 0,
+  deadline TIMESTAMP WITH TIME ZONE,
+  category TEXT,
+  is_completed BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
+);
+
 -- FUNCTIONS & RPCS (Continued)
 
 -- G. Add Beneficiary RPC
@@ -659,10 +688,47 @@ BEGIN
     'pending_transactions', (SELECT count(*) FROM transactions WHERE status = 'pending'),
     'active_cards', (SELECT count(*) FROM cards WHERE status = 'active'),
     'open_tickets', (SELECT count(*) FROM support_tickets WHERE status = 'open'),
-    'total_volume_today', (SELECT COALESCE(sum(abs(amount)), 0) FROM transactions WHERE created_at >= CURRENT_DATE AND status = 'released')
+    'total_volume_today', (SELECT COALESCE(sum(abs(amount)), 0) FROM transactions WHERE created_at >= CURRENT_DATE AND status = 'released'),
+    'pending_loans', (SELECT count(*) FROM loans WHERE status = 'pending'),
+    'active_loans_volume', (SELECT COALESCE(sum(amount), 0) FROM loans WHERE status = 'active'),
+    'total_savings_volume', (SELECT COALESCE(sum(current_amount), 0) FROM savings_goals),
+    'pending_bills_count', (SELECT count(*) FROM bill_payments WHERE status = 'scheduled'),
+    'total_investments_volume', (SELECT COALESCE(sum(quantity * current_price), 0) FROM investments)
   ) INTO result;
 
   RETURN result;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- I. Get User By Email RPC
+CREATE OR REPLACE FUNCTION get_user_by_email(target_email TEXT)
+RETURNS TABLE (
+  id UUID,
+  full_name TEXT,
+  email TEXT,
+  avatar_url TEXT
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT p.id, p.full_name, p.email, p.avatar_url
+  FROM profiles p
+  WHERE p.email = target_email;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- J. Apply For Loan RPC
+CREATE OR REPLACE FUNCTION apply_for_loan(
+  loan_amount NUMERIC,
+  loan_term INTEGER
+) RETURNS UUID AS $$
+DECLARE
+  new_loan_id UUID;
+BEGIN
+  INSERT INTO loans (user_id, amount, term_months, status, remaining_balance)
+  VALUES (auth.uid(), loan_amount, loan_term, 'pending', loan_amount)
+  RETURNING id INTO new_loan_id;
+  
+  RETURN new_loan_id;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -671,9 +737,23 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 ALTER TABLE beneficiaries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE support_tickets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wire_transfer_details ENABLE ROW LEVEL SECURITY;
+ALTER TABLE loans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE savings_goals ENABLE ROW LEVEL SECURITY;
 
--- Beneficiaries
-CREATE POLICY "Users can manage their own beneficiaries" ON beneficiaries
+-- Loans
+CREATE POLICY "Users can view their own loans" ON loans
+  FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can apply for loans" ON loans
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Admins can manage all loans" ON loans
+  FOR ALL USING (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
+  );
+
+-- Savings Goals
+CREATE POLICY "Users can manage their own savings goals" ON savings_goals
   FOR ALL USING (auth.uid() = user_id);
 
 -- Support Tickets
@@ -696,6 +776,330 @@ CREATE POLICY "Users can view their own wire details" ON wire_transfer_details
 
 CREATE POLICY "Admins can view all wire details" ON wire_transfer_details
   FOR SELECT USING (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
+  );
+
+-- 16. Bill Payments Table
+CREATE TABLE IF NOT EXISTS bill_payments (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  biller_name TEXT NOT NULL,
+  account_number TEXT NOT NULL,
+  amount NUMERIC NOT NULL,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'scheduled', 'completed', 'failed')),
+  scheduled_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
+);
+
+-- 17. Investments Table
+CREATE TABLE IF NOT EXISTS investments (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  asset_name TEXT NOT NULL,
+  asset_symbol TEXT NOT NULL,
+  quantity NUMERIC NOT NULL,
+  average_price NUMERIC NOT NULL,
+  current_price NUMERIC,
+  asset_type TEXT CHECK (asset_type IN ('stock', 'crypto', 'bond', 'etf')),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
+);
+
+-- 18. Referrals Table
+CREATE TABLE IF NOT EXISTS referrals (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  referrer_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  referred_email TEXT NOT NULL,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'joined', 'rewarded')),
+  reward_amount NUMERIC DEFAULT 25,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
+);
+
+-- 19. Exchange Rates Table
+CREATE TABLE IF NOT EXISTS exchange_rates (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  from_currency TEXT NOT NULL,
+  to_currency TEXT NOT NULL,
+  rate NUMERIC NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()),
+  UNIQUE(from_currency, to_currency)
+);
+
+-- Insert default exchange rates
+INSERT INTO exchange_rates (from_currency, to_currency, rate)
+VALUES 
+  ('USD', 'EUR', 0.92),
+  ('EUR', 'USD', 1.09),
+  ('USD', 'GBP', 0.79),
+  ('GBP', 'USD', 1.27),
+  ('USD', 'JPY', 151.42),
+  ('JPY', 'USD', 0.0066)
+ON CONFLICT (from_currency, to_currency) DO UPDATE SET rate = EXCLUDED.rate;
+
+-- FUNCTIONS & RPCS (Continued)
+
+-- 18. Loan Repayments Table
+CREATE TABLE IF NOT EXISTS loan_repayments (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  loan_id UUID REFERENCES loans(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  amount NUMERIC NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
+);
+
+ALTER TABLE loan_repayments ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own repayments" ON loan_repayments
+  FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Admins can view all repayments" ON loan_repayments
+  FOR SELECT USING (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
+  );
+
+-- K. Repay Loan RPC
+CREATE OR REPLACE FUNCTION repay_loan(
+  target_loan_id UUID,
+  repayment_amount NUMERIC
+) RETURNS BOOLEAN AS $$
+DECLARE
+  current_user_balance NUMERIC;
+  loan_balance NUMERIC;
+BEGIN
+  -- Security Check
+  IF NOT EXISTS (SELECT 1 FROM loans WHERE id = target_loan_id AND user_id = auth.uid()) THEN
+    RAISE EXCEPTION 'Unauthorized';
+  END IF;
+
+  -- Get balances
+  SELECT balance INTO current_user_balance FROM profiles WHERE id = auth.uid();
+  SELECT remaining_balance INTO loan_balance FROM loans WHERE id = target_loan_id;
+
+  -- Validation
+  IF repayment_amount <= 0 THEN
+    RAISE EXCEPTION 'Repayment amount must be positive';
+  END IF;
+
+  IF current_user_balance < repayment_amount THEN
+    RAISE EXCEPTION 'Insufficient funds';
+  END IF;
+
+  -- Atomic Transaction
+  -- 1. Debit User
+  INSERT INTO transactions (user_id, amount, status, description)
+  VALUES (auth.uid(), -repayment_amount, 'released', 'Loan Repayment');
+
+  -- 2. Update Loan
+  UPDATE loans
+  SET remaining_balance = remaining_balance - repayment_amount,
+      status = CASE WHEN remaining_balance - repayment_amount <= 0 THEN 'paid' ELSE status END,
+      updated_at = NOW()
+  WHERE id = target_loan_id;
+
+  -- 3. Log Repayment
+  INSERT INTO loan_repayments (loan_id, user_id, amount)
+  VALUES (target_loan_id, auth.uid(), repayment_amount);
+
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- L. Contribute to Savings Goal RPC
+CREATE OR REPLACE FUNCTION contribute_to_savings(
+  target_goal_id UUID,
+  contribution_amount NUMERIC
+) RETURNS BOOLEAN AS $$
+DECLARE
+  current_user_balance NUMERIC;
+BEGIN
+  -- Security Check
+  IF NOT EXISTS (SELECT 1 FROM savings_goals WHERE id = target_goal_id AND user_id = auth.uid()) THEN
+    RAISE EXCEPTION 'Unauthorized';
+  END IF;
+
+  -- Get balance
+  SELECT balance INTO current_user_balance FROM profiles WHERE id = auth.uid();
+
+  -- Validation
+  IF contribution_amount <= 0 THEN
+    RAISE EXCEPTION 'Contribution amount must be positive';
+  END IF;
+
+  IF current_user_balance < contribution_amount THEN
+    RAISE EXCEPTION 'Insufficient funds';
+  END IF;
+
+  -- Atomic Transaction
+  -- 1. Debit User
+  INSERT INTO transactions (user_id, amount, status, description)
+  VALUES (auth.uid(), -contribution_amount, 'released', 'Savings Goal Contribution');
+
+  -- 2. Update Goal
+  UPDATE savings_goals
+  SET current_amount = current_amount + contribution_amount,
+      is_completed = CASE WHEN current_amount + contribution_amount >= target_amount THEN TRUE ELSE FALSE END,
+      updated_at = NOW()
+  WHERE id = target_goal_id;
+
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- M. Pay Bill RPC
+CREATE OR REPLACE FUNCTION pay_bill(
+  target_bill_id UUID
+) RETURNS BOOLEAN AS $$
+DECLARE
+  current_user_balance NUMERIC;
+  bill_amount NUMERIC;
+  biller TEXT;
+BEGIN
+  -- Security Check
+  IF NOT EXISTS (SELECT 1 FROM bill_payments WHERE id = target_bill_id AND user_id = auth.uid() AND status IN ('pending', 'scheduled')) THEN
+    RAISE EXCEPTION 'Unauthorized or bill already paid';
+  END IF;
+
+  -- Get data
+  SELECT balance INTO current_user_balance FROM profiles WHERE id = auth.uid();
+  SELECT amount, biller_name INTO bill_amount, biller FROM bill_payments WHERE id = target_bill_id;
+
+  -- Validation
+  IF current_user_balance < bill_amount THEN
+    RAISE EXCEPTION 'Insufficient funds';
+  END IF;
+
+  -- Atomic Transaction
+  -- 1. Debit User
+  INSERT INTO transactions (user_id, amount, status, description)
+  VALUES (auth.uid(), -bill_amount, 'released', 'Bill Payment: ' || biller);
+
+  -- 2. Update Bill
+  UPDATE bill_payments
+  SET status = 'completed'
+  WHERE id = target_bill_id;
+
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- N. Buy Investment RPC
+CREATE OR REPLACE FUNCTION buy_investment(
+  asset_name TEXT,
+  asset_symbol TEXT,
+  quantity NUMERIC,
+  price NUMERIC,
+  asset_type TEXT
+) RETURNS BOOLEAN AS $$
+DECLARE
+  current_user_balance NUMERIC;
+  total_cost NUMERIC;
+BEGIN
+  total_cost := quantity * price;
+
+  -- Get balance
+  SELECT balance INTO current_user_balance FROM profiles WHERE id = auth.uid();
+
+  -- Validation
+  IF current_user_balance < total_cost THEN
+    RAISE EXCEPTION 'Insufficient funds';
+  END IF;
+
+  -- Atomic Transaction
+  -- 1. Debit User
+  INSERT INTO transactions (user_id, amount, status, description)
+  VALUES (auth.uid(), -total_cost, 'released', 'Investment Purchase: ' || asset_symbol);
+
+  -- 2. Update/Insert Investment
+  IF EXISTS (SELECT 1 FROM investments WHERE user_id = auth.uid() AND asset_symbol = buy_investment.asset_symbol) THEN
+    UPDATE investments
+    SET 
+      average_price = (average_price * quantity + total_cost) / (quantity + buy_investment.quantity),
+      quantity = quantity + buy_investment.quantity,
+      updated_at = NOW()
+    WHERE user_id = auth.uid() AND asset_symbol = buy_investment.asset_symbol;
+  ELSE
+    INSERT INTO investments (user_id, asset_name, asset_symbol, quantity, average_price, current_price, asset_type)
+    VALUES (auth.uid(), asset_name, asset_symbol, quantity, price, price, asset_type);
+  END IF;
+
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- O. Sell Investment RPC
+CREATE OR REPLACE FUNCTION sell_investment(
+  target_investment_id UUID,
+  sell_quantity NUMERIC,
+  sell_price NUMERIC
+) RETURNS BOOLEAN AS $$
+DECLARE
+  current_quantity NUMERIC;
+  total_gain NUMERIC;
+  symbol TEXT;
+BEGIN
+  -- Security Check
+  IF NOT EXISTS (SELECT 1 FROM investments WHERE id = target_investment_id AND user_id = auth.uid()) THEN
+    RAISE EXCEPTION 'Unauthorized';
+  END IF;
+
+  -- Get data
+  SELECT quantity, asset_symbol INTO current_quantity, symbol FROM investments WHERE id = target_investment_id;
+
+  -- Validation
+  IF current_quantity < sell_quantity THEN
+    RAISE EXCEPTION 'Insufficient quantity';
+  END IF;
+
+  total_gain := sell_quantity * sell_price;
+
+  -- Atomic Transaction
+  -- 1. Credit User
+  INSERT INTO transactions (user_id, amount, status, description)
+  VALUES (auth.uid(), total_gain, 'released', 'Investment Sale: ' || symbol);
+
+  -- 2. Update Investment
+  IF current_quantity = sell_quantity THEN
+    DELETE FROM investments WHERE id = target_investment_id;
+  ELSE
+    UPDATE investments
+    SET 
+      quantity = quantity - sell_quantity,
+      updated_at = NOW()
+    WHERE id = target_investment_id;
+  END IF;
+
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- RLS POLICIES (Continued)
+
+ALTER TABLE bill_payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE investments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE referrals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE exchange_rates ENABLE ROW LEVEL SECURITY;
+
+-- Bill Payments
+CREATE POLICY "Users can manage their own bill payments" ON bill_payments
+  FOR ALL USING (auth.uid() = user_id);
+
+-- Investments
+CREATE POLICY "Users can manage their own investments" ON investments
+  FOR ALL USING (auth.uid() = user_id);
+
+-- Referrals
+CREATE POLICY "Users can view their own referrals" ON referrals
+  FOR SELECT USING (auth.uid() = referrer_id);
+
+CREATE POLICY "Users can create referrals" ON referrals
+  FOR INSERT WITH CHECK (auth.uid() = referrer_id);
+
+-- Exchange Rates
+CREATE POLICY "Anyone can view exchange rates" ON exchange_rates
+  FOR SELECT USING (true);
+
+CREATE POLICY "Admins can manage exchange rates" ON exchange_rates
+  FOR ALL USING (
     EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
   );
 

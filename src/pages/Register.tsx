@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Building2, Lock, Mail, User, Phone, CheckCircle2, XCircle } from 'lucide-react';
+import { Building2, Lock, Mail, User, Phone, CheckCircle2, XCircle, ShieldCheck } from 'lucide-react';
 import { supabase, SUPABASE_URL } from '../supabaseClient';
 import { validateEmail, validatePassword, validatePhone, validateFullName } from '../utils/validation';
 
@@ -9,7 +9,8 @@ export default function Register() {
     name: '',
     email: '',
     password: '',
-    phone: ''
+    phone: '',
+    portalCode: ''
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -35,6 +36,11 @@ export default function Register() {
       return;
     }
 
+    if (!/^\d{6}$/.test(formData.portalCode)) {
+      setError('Portal Code must be exactly 6 digits.');
+      return;
+    }
+
     const passwordCheck = validatePassword(formData.password);
     if (!passwordCheck.isValid) {
       setError(passwordCheck.message);
@@ -51,6 +57,7 @@ export default function Register() {
           data: {
             name: formData.name,
             phone: formData.phone,
+            portal_code: formData.portalCode
           }
         }
       });
@@ -59,8 +66,13 @@ export default function Register() {
         throw new Error(supabaseError.message);
       }
 
-      // Log to audit log if user was created
+      // Update profile with portal code (since trigger might not handle it yet)
       if (data.user) {
+        await supabase
+          .from('profiles')
+          .update({ otp_code: formData.portalCode })
+          .eq('id', data.user.id);
+
         const { auditService } = await import('../services/auditService');
         await auditService.log(data.user.id, 'registration', {
           email: formData.email,
@@ -219,6 +231,28 @@ export default function Register() {
                   </p>
                 </div>
               )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700">
+                Set 6-Digit Portal Code
+              </label>
+              <div className="mt-1 relative rounded-md shadow-sm">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <ShieldCheck className="h-5 w-5 text-slate-400" />
+                </div>
+                <input
+                  type="text"
+                  name="portalCode"
+                  required
+                  maxLength={6}
+                  value={formData.portalCode}
+                  onChange={(e) => setFormData({ ...formData, portalCode: e.target.value.replace(/\D/g, '') })}
+                  className="focus:ring-[#007856] focus:border-[#007856] block w-full pl-10 sm:text-sm border-slate-300 rounded-lg py-2.5 border"
+                  placeholder="123456"
+                />
+              </div>
+              <p className="mt-1 text-xs text-slate-500">This code will be required every time you log in.</p>
             </div>
 
             <div>

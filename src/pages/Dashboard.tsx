@@ -2,7 +2,7 @@ import { useState, useEffect, Fragment, useCallback } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { supabase } from '../supabaseClient';
 import { format, subDays, startOfDay } from 'date-fns';
-import { ArrowUpRight, ArrowDownLeft, Clock, CheckCircle2, AlertCircle, AlertTriangle, X, ChevronDown, ChevronUp, Info, Send, ShieldCheck, PieChart, CreditCard, Building2, MessageSquare, UserCircle, Globe, Upload, Download } from 'lucide-react';
+import { ArrowUpRight, ArrowDownLeft, Clock, CheckCircle2, AlertCircle, AlertTriangle, X, ChevronDown, ChevronUp, Info, Send, ShieldCheck, PieChart, CreditCard, Building2, MessageSquare, UserCircle, Globe, Upload, Download, Receipt, LineChart, Landmark, Wallet, Gift } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
@@ -37,6 +37,12 @@ export default function Dashboard() {
   const [chartData, setChartData] = useState<any[]>([]);
   const [checkImages, setCheckImages] = useState<Record<string, string>>({});
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
+  const [summaries, setSummaries] = useState({
+    loans: 0,
+    savings: 0,
+    bills: 0,
+    investments: 0
+  });
 
   const toggleExpand = (txId: string) => {
     setExpandedTxId(expandedTxId === txId ? null : txId);
@@ -171,6 +177,21 @@ Thank you for banking with NovaBank.
         setAdminNotes(notesData);
       }
 
+      // 4. Fetch Summaries
+      const [loansRes, savingsRes, billsRes, investmentsRes] = await Promise.all([
+        supabase.from('loans').select('remaining_balance').eq('user_id', user.id).eq('status', 'approved'),
+        supabase.from('savings_goals').select('current_amount').eq('user_id', user.id),
+        supabase.from('bill_payments').select('amount').eq('user_id', user.id).eq('status', 'scheduled'),
+        supabase.from('investments').select('quantity, current_price, average_price').eq('user_id', user.id)
+      ]);
+
+      setSummaries({
+        loans: loansRes.data?.reduce((acc, l) => acc + Number(l.remaining_balance), 0) || 0,
+        savings: savingsRes.data?.reduce((acc, s) => acc + Number(s.current_amount), 0) || 0,
+        bills: billsRes.data?.reduce((acc, b) => acc + Number(b.amount), 0) || 0,
+        investments: investmentsRes.data?.reduce((acc, i) => acc + (Number(i.quantity) * (Number(i.current_price) || Number(i.average_price))), 0) || 0
+      });
+
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
     } finally {
@@ -298,7 +319,7 @@ Thank you for banking with NovaBank.
         </div>
       </div>
 
-      {/* Admin Notes / Warnings */}
+      {/* System Notifications / Warnings */}
       <AnimatePresence>
         {adminNotes.length > 0 && (
           <motion.div 
@@ -313,7 +334,7 @@ Thank you for banking with NovaBank.
                   <AlertTriangle className="h-5 w-5 text-amber-500 mr-3 mt-0.5 flex-shrink-0" />
                   <div className="flex-1">
                     <div className="flex justify-between items-start">
-                      <h3 className="text-sm font-medium text-amber-800">Important Notification</h3>
+                      <h3 className="text-sm font-medium text-amber-800">Bank Notification</h3>
                       <Link to="/notifications" className="text-[10px] font-bold text-amber-600 hover:underline uppercase tracking-wider">View All</Link>
                     </div>
                     <p className="text-sm text-amber-700 mt-1">{note.message}</p>
@@ -334,6 +355,46 @@ Thank you for banking with NovaBank.
       </AnimatePresence>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Financial Overview */}
+        <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Link to="/loans" className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 hover:border-emerald-200 transition-all group">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 bg-amber-50 rounded-lg group-hover:bg-amber-100 transition-colors">
+                <Landmark className="w-5 h-5 text-amber-600" />
+              </div>
+              <span className="text-sm font-medium text-slate-500">Active Loans</span>
+            </div>
+            <p className="text-xl font-bold text-slate-900">${summaries.loans.toLocaleString()}</p>
+          </Link>
+          <Link to="/savings" className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 hover:border-emerald-200 transition-all group">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 bg-blue-50 rounded-lg group-hover:bg-blue-100 transition-colors">
+                <Wallet className="w-5 h-5 text-blue-600" />
+              </div>
+              <span className="text-sm font-medium text-slate-500">Total Savings</span>
+            </div>
+            <p className="text-xl font-bold text-slate-900">${summaries.savings.toLocaleString()}</p>
+          </Link>
+          <Link to="/bill-pay" className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 hover:border-emerald-200 transition-all group">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 bg-rose-50 rounded-lg group-hover:bg-rose-100 transition-colors">
+                <Receipt className="w-5 h-5 text-rose-600" />
+              </div>
+              <span className="text-sm font-medium text-slate-500">Scheduled Bills</span>
+            </div>
+            <p className="text-xl font-bold text-slate-900">${summaries.bills.toLocaleString()}</p>
+          </Link>
+          <Link to="/investments" className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 hover:border-emerald-200 transition-all group">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 bg-emerald-50 rounded-lg group-hover:bg-emerald-100 transition-colors">
+                <LineChart className="w-5 h-5 text-emerald-600" />
+              </div>
+              <span className="text-sm font-medium text-slate-500">Investments</span>
+            </div>
+            <p className="text-xl font-bold text-slate-900">${summaries.investments.toLocaleString()}</p>
+          </Link>
+        </div>
+
         {/* Balance Card */}
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -582,21 +643,13 @@ Thank you for banking with NovaBank.
                 <Upload className="w-6 h-6 mb-2 text-slate-400 group-hover:text-[#007856]" />
                 <span className="text-xs font-bold">Deposit</span>
               </Link>
-              <Link to="/wire-transfer" className="flex flex-col items-center justify-center p-4 rounded-2xl bg-slate-50 hover:bg-emerald-50 hover:text-[#007856] transition-all group border border-transparent hover:border-emerald-100">
-                <Globe className="w-6 h-6 mb-2 text-slate-400 group-hover:text-[#007856]" />
-                <span className="text-xs font-bold">Wire Transfer</span>
-              </Link>
-              <button className="flex flex-col items-center justify-center p-4 rounded-2xl bg-slate-50 hover:bg-emerald-50 hover:text-[#007856] transition-all group border border-transparent hover:border-emerald-100">
-                <CreditCard className="w-6 h-6 mb-2 text-slate-400 group-hover:text-[#007856]" />
+              <Link to="/bill-pay" className="flex flex-col items-center justify-center p-4 rounded-2xl bg-slate-50 hover:bg-emerald-50 hover:text-[#007856] transition-all group border border-transparent hover:border-emerald-100">
+                <Receipt className="w-6 h-6 mb-2 text-slate-400 group-hover:text-[#007856]" />
                 <span className="text-xs font-bold">Pay Bills</span>
-              </button>
+              </Link>
               <Link to="/support" className="flex flex-col items-center justify-center p-4 rounded-2xl bg-slate-50 hover:bg-emerald-50 hover:text-[#007856] transition-all group border border-transparent hover:border-emerald-100">
                 <MessageSquare className="w-6 h-6 mb-2 text-slate-400 group-hover:text-[#007856]" />
                 <span className="text-xs font-bold">Support</span>
-              </Link>
-              <Link to="/profile" className="flex flex-col items-center justify-center p-4 rounded-2xl bg-slate-50 hover:bg-emerald-50 hover:text-[#007856] transition-all group border border-transparent hover:border-emerald-100">
-                <UserCircle className="w-6 h-6 mb-2 text-slate-400 group-hover:text-[#007856]" />
-                <span className="text-xs font-bold">Settings</span>
               </Link>
             </div>
           </div>

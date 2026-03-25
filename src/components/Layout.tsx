@@ -1,6 +1,6 @@
 import { Link, useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { Building2, LogOut, LayoutDashboard, UserCircle, MessageSquare, DollarSign, Clock, Menu, X, ArrowDownLeft, Globe, Bell, CreditCard, Shield, Users, History, Settings } from 'lucide-react';
+import { Building2, LogOut, LayoutDashboard, UserCircle, MessageSquare, DollarSign, Clock, Menu, X, ArrowDownLeft, Globe, Bell, CreditCard, Shield, Users, History, Settings, PiggyBank, Banknote, Receipt, LineChart, Gift } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { AvatarImage } from './AvatarImage';
@@ -82,24 +82,24 @@ export default function Layout() {
   const navItems = [
     { name: 'Accounts', path: '/dashboard', icon: Building2 },
     { name: 'Transactions', path: '/transactions', icon: Clock },
-    { name: 'Cards', path: '/cards', icon: CreditCard },
     { name: 'Transfer', path: '/transfer', icon: DollarSign },
-    { name: 'Deposit', path: '/deposit', icon: ArrowDownLeft },
-    { name: 'Wire', path: '/wire-transfer', icon: Globe },
-    { name: 'Support', path: '/support', icon: MessageSquare },
     { name: 'Profile', path: '/profile', icon: UserCircle },
   ];
 
   const adminItems = [
     { name: 'Admin Hub', path: '/admin', icon: Shield },
     { name: 'Users', path: '/admin/users', icon: Users },
+    { name: 'Transactions', path: '/admin/transactions', icon: Clock },
     { name: 'Audit Logs', path: '/admin/audit', icon: History },
     { name: 'Support', path: '/admin/support', icon: MessageSquare },
     { name: 'Broadcast', path: '/admin/notifications', icon: Bell },
+    { name: 'Loans', path: '/admin/loans', icon: Banknote },
+    { name: 'Savings', path: '/admin/savings', icon: PiggyBank },
     { name: 'Settings', path: '/admin/settings', icon: Settings },
   ];
 
-  const allNavItems = user?.is_admin ? [...navItems, ...adminItems] : navItems;
+  const isAdminPath = location.pathname.startsWith('/admin') && user?.is_admin;
+  const allNavItems = isAdminPath ? adminItems : navItems;
 
   return (
     <div className="min-h-screen bg-[#F4F6F8] flex flex-col font-sans">

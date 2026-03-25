@@ -20,7 +20,13 @@ import {
   Lock,
   Unlock,
   DollarSign,
-  CheckCircle2
+  CheckCircle2,
+  Send,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Trash2,
+  Key,
+  Edit3
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
@@ -47,8 +53,21 @@ export default function AdminUsers() {
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isEditBalanceModalOpen, setIsEditBalanceModalOpen] = useState(false);
+  const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
+  const [isTransactionsModalOpen, setIsTransactionsModalOpen] = useState(false);
+  const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false);
+  const [userTransactions, setUserTransactions] = useState<any[]>([]);
+  const [messageText, setMessageText] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
   const [newBalance, setNewBalance] = useState<string>('');
   const [adjustingBalance, setAdjustingBalance] = useState(false);
+  const [txLoading, setTxLoading] = useState(false);
+  const [editProfileData, setEditProfileData] = useState({
+    full_name: '',
+    email: '',
+    phone: ''
+  });
+  const [updatingProfile, setUpdatingProfile] = useState(false);
 
   useEffect(() => {
     fetchUsers();
@@ -142,10 +161,132 @@ export default function AdminUsers() {
     setIsDetailsModalOpen(true);
   };
 
+  const openMessageModal = (user: UserProfile) => {
+    setSelectedUser(user);
+    setMessageText('');
+    setIsMessageModalOpen(true);
+  };
+
+  const openTransactionsModal = async (user: UserProfile) => {
+    setSelectedUser(user);
+    setIsTransactionsModalOpen(true);
+    setTxLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      setUserTransactions(data || []);
+    } catch (err) {
+      console.error('Error fetching user transactions:', err);
+      toast.error('Failed to load transactions');
+    } finally {
+      setTxLoading(false);
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!selectedUser || !messageText.trim()) return;
+
+    try {
+      setSendingMessage(true);
+      const { error } = await supabase
+        .from('admin_notes')
+        .insert({
+          user_id: selectedUser.id,
+          message: messageText.trim(),
+          is_read: false
+        });
+
+      if (error) throw error;
+
+      toast.success('Message sent to user');
+      setIsMessageModalOpen(false);
+    } catch (err) {
+      console.error('Error sending message:', err);
+      toast.error('Failed to send message');
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
   const openEditBalance = (user: UserProfile) => {
     setSelectedUser(user);
     setNewBalance(user.balance.toString());
     setIsEditBalanceModalOpen(true);
+  };
+
+  const openEditProfile = (user: UserProfile) => {
+    setSelectedUser(user);
+    setEditProfileData({
+      full_name: user.full_name || '',
+      email: user.email || '',
+      phone: user.phone || ''
+    });
+    setIsEditProfileModalOpen(true);
+  };
+
+  const handleUpdateProfile = async () => {
+    if (!selectedUser) return;
+
+    try {
+      setUpdatingProfile(true);
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          full_name: editProfileData.full_name,
+          email: editProfileData.email,
+          phone: editProfileData.phone
+        })
+        .eq('id', selectedUser.id);
+
+      if (error) throw error;
+
+      toast.success('User profile updated successfully');
+      setIsEditProfileModalOpen(false);
+      fetchUsers();
+    } catch (err) {
+      console.error('Error updating profile:', err);
+      toast.error('Failed to update profile');
+    } finally {
+      setUpdatingProfile(false);
+    }
+  };
+
+  const handleResetPassword = async (email: string) => {
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) throw error;
+      toast.success('Password reset email sent to user');
+    } catch (err) {
+      console.error('Error resetting password:', err);
+      toast.error('Failed to send reset email');
+    }
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    if (!window.confirm('Are you sure you want to delete this user? This action cannot be undone.')) return;
+
+    try {
+      // In a real app, you might want to soft delete or use a service role to delete from auth.users
+      // For now, we'll mark the account as 'deleted' in profiles
+      const { error } = await supabase
+        .from('profiles')
+        .update({ account_status: 'deleted' })
+        .eq('id', userId);
+
+      if (error) throw error;
+      toast.success('User account marked as deleted');
+      fetchUsers();
+    } catch (err) {
+      console.error('Error deleting user:', err);
+      toast.error('Failed to delete user');
+    }
   };
 
   const handleUpdateBalance = async () => {
@@ -282,6 +423,34 @@ export default function AdminUsers() {
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <button 
+                        onClick={() => openEditProfile(user)}
+                        className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
+                        title="Edit Profile"
+                      >
+                        <Edit3 className="w-5 h-5" />
+                      </button>
+                      <button 
+                        onClick={() => handleResetPassword(user.email)}
+                        className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-xl transition-colors"
+                        title="Reset Password"
+                      >
+                        <Key className="w-5 h-5" />
+                      </button>
+                      <button 
+                        onClick={() => openMessageModal(user)}
+                        className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
+                        title="Send Message"
+                      >
+                        <Mail className="w-5 h-5" />
+                      </button>
+                      <button 
+                        onClick={() => openTransactionsModal(user)}
+                        className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-xl transition-colors"
+                        title="View Transactions"
+                      >
+                        <History className="w-5 h-5" />
+                      </button>
+                      <button 
                         onClick={() => openEditBalance(user)}
                         className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors"
                         title="Edit Balance"
@@ -305,6 +474,13 @@ export default function AdminUsers() {
                         title="View Details"
                       >
                         <Eye className="w-5 h-5" />
+                      </button>
+                      <button 
+                        onClick={() => handleDeleteUser(user.id)}
+                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
+                        title="Delete User"
+                      >
+                        <Trash2 className="w-5 h-5" />
                       </button>
                     </div>
                   </td>
@@ -445,6 +621,73 @@ export default function AdminUsers() {
         )}
       </AnimatePresence>
 
+      {/* Edit Profile Modal */}
+      <AnimatePresence>
+        {isEditProfileModalOpen && selectedUser && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white w-full max-w-md rounded-[32px] shadow-2xl overflow-hidden"
+            >
+              <div className="p-8">
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-xl font-bold text-slate-900">Edit User Profile</h2>
+                  <button 
+                    onClick={() => setIsEditProfileModalOpen(false)}
+                    className="p-2 hover:bg-slate-100 rounded-full transition-colors"
+                  >
+                    <X className="w-5 h-5 text-slate-400" />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Full Name</label>
+                    <input 
+                      type="text"
+                      value={editProfileData.full_name}
+                      onChange={(e) => setEditProfileData(prev => ({ ...prev, full_name: e.target.value }))}
+                      className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl text-sm font-medium focus:ring-2 focus:ring-[#007856]/20 transition-all"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Email Address</label>
+                    <input 
+                      type="email"
+                      value={editProfileData.email}
+                      onChange={(e) => setEditProfileData(prev => ({ ...prev, email: e.target.value }))}
+                      className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl text-sm font-medium focus:ring-2 focus:ring-[#007856]/20 transition-all"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Phone Number</label>
+                    <input 
+                      type="tel"
+                      value={editProfileData.phone}
+                      onChange={(e) => setEditProfileData(prev => ({ ...prev, phone: e.target.value }))}
+                      className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl text-sm font-medium focus:ring-2 focus:ring-[#007856]/20 transition-all"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleUpdateProfile}
+                    disabled={updatingProfile}
+                    className="w-full py-4 bg-[#007856] text-white font-bold rounded-2xl hover:bg-[#006045] transition-all shadow-lg shadow-emerald-200 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {updatingProfile ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
+                    Save Changes
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Edit Balance Modal */}
       <AnimatePresence>
         {isEditBalanceModalOpen && selectedUser && (
@@ -485,6 +728,28 @@ export default function AdminUsers() {
                         placeholder="0.00"
                       />
                     </div>
+                    <div className="flex gap-2 mt-2">
+                      {[100, 500, 1000, 5000].map(amount => (
+                        <button
+                          key={amount}
+                          onClick={() => setNewBalance((prev) => (Number(prev || 0) + amount).toString())}
+                          className="flex-1 py-2 bg-emerald-50 text-emerald-600 text-[10px] font-bold rounded-lg hover:bg-emerald-100 transition-colors"
+                        >
+                          +{amount}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      {[100, 500, 1000, 5000].map(amount => (
+                        <button
+                          key={amount}
+                          onClick={() => setNewBalance((prev) => Math.max(0, Number(prev || 0) - amount).toString())}
+                          className="flex-1 py-2 bg-rose-50 text-rose-600 text-[10px] font-bold rounded-lg hover:bg-rose-100 transition-colors"
+                        >
+                          -{amount}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 flex items-start gap-3">
@@ -503,6 +768,129 @@ export default function AdminUsers() {
                     Confirm Adjustment
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* Send Message Modal */}
+      <AnimatePresence>
+        {isMessageModalOpen && selectedUser && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white w-full max-w-md rounded-[32px] shadow-2xl overflow-hidden"
+            >
+              <div className="p-8">
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-xl font-bold text-slate-900">Send Bank Message</h2>
+                  <button 
+                    onClick={() => setIsMessageModalOpen(false)}
+                    className="p-2 hover:bg-slate-100 rounded-full transition-colors"
+                  >
+                    <X className="w-5 h-5 text-slate-400" />
+                  </button>
+                </div>
+
+                <div className="space-y-6">
+                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Recipient</p>
+                    <p className="text-sm font-bold text-slate-900">{selectedUser.full_name}</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Message Content</label>
+                    <textarea 
+                      value={messageText}
+                      onChange={(e) => setMessageText(e.target.value)}
+                      rows={4}
+                      className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl text-sm font-medium focus:ring-2 focus:ring-[#007856]/20 transition-all resize-none"
+                      placeholder="Type your message here..."
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleSendMessage}
+                    disabled={sendingMessage || !messageText.trim()}
+                    className="w-full py-4 bg-[#007856] text-white font-bold rounded-2xl hover:bg-[#006045] transition-all shadow-lg shadow-emerald-200 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {sendingMessage ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+                    Send Message
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* View Transactions Modal */}
+      <AnimatePresence>
+        {isTransactionsModalOpen && selectedUser && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white w-full max-w-2xl rounded-[32px] shadow-2xl overflow-hidden"
+            >
+              <div className="p-8 border-b border-slate-100 flex justify-between items-center">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Transaction History</h2>
+                  <p className="text-sm text-slate-500 font-medium">{selectedUser.full_name}</p>
+                </div>
+                <button 
+                  onClick={() => setIsTransactionsModalOpen(false)}
+                  className="p-2 hover:bg-slate-100 rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5 text-slate-400" />
+                </button>
+              </div>
+
+              <div className="p-8 max-h-[60vh] overflow-y-auto">
+                {txLoading ? (
+                  <div className="flex justify-center py-12">
+                    <Loader2 className="w-8 h-8 animate-spin text-[#007856]" />
+                  </div>
+                ) : userTransactions.length === 0 ? (
+                  <div className="text-center py-12">
+                    <History className="w-12 h-12 text-slate-200 mx-auto mb-4" />
+                    <p className="text-slate-400 font-medium">No transactions found for this user.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {userTransactions.map((tx) => (
+                      <div key={tx.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                        <div className="flex items-center gap-4">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                            tx.amount >= 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
+                          }`}>
+                            {tx.amount >= 0 ? <ArrowUpRight className="w-5 h-5" /> : <ArrowDownLeft className="w-5 h-5" />}
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-slate-900">{tx.description}</p>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                              {format(new Date(tx.created_at), 'MMM dd, yyyy h:mm a')}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className={`text-sm font-bold ${tx.amount >= 0 ? 'text-emerald-600' : 'text-slate-900'}`}>
+                            {tx.amount >= 0 ? '+' : ''}${Math.abs(tx.amount).toLocaleString()}
+                          </p>
+                          <span className={`text-[10px] font-bold uppercase tracking-widest ${
+                            tx.status === 'released' ? 'text-emerald-500' : 
+                            tx.status === 'pending' ? 'text-amber-500' : 'text-rose-500'
+                          }`}>
+                            {tx.status}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </motion.div>
           </div>

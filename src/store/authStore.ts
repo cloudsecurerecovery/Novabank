@@ -32,7 +32,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   isOtpVerified: false,
   login: (user) => {
-    set({ user, isAuthenticated: true, isOtpVerified: false });
+    set({ user, isAuthenticated: true, isOtpVerified: user.is_admin });
   },
   logout: () => {
     set({ user: null, isAuthenticated: false, isOtpVerified: false });

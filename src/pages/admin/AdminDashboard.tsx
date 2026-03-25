@@ -14,8 +14,18 @@ import {
   Eye,
   CreditCard,
   MessageSquare,
-  Globe
+  Globe,
+  Wallet,
+  Receipt,
+  LineChart,
+  ArrowRight,
+  Bell,
+  RefreshCw,
+  Send,
+  AlertTriangle,
+  X
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import { format } from 'date-fns';
@@ -55,6 +65,11 @@ interface AdminStats {
   active_cards: number;
   open_tickets: number;
   total_volume_today: number;
+  pending_loans: number;
+  active_loans_volume: number;
+  total_savings_volume: number;
+  pending_bills_count: number;
+  total_investments_volume: number;
 }
 
 export default function AdminDashboard() {
@@ -71,9 +86,17 @@ export default function AdminDashboard() {
     pending_transactions: 0,
     active_cards: 0,
     open_tickets: 0,
-    total_volume_today: 0
+    total_volume_today: 0,
+    pending_loans: 0,
+    active_loans_volume: 0,
+    total_savings_volume: 0,
+    pending_bills_count: 0,
+    total_investments_volume: 0
   });
   const [activeTab, setActiveTab] = useState<'pending' | 'recent'>('pending');
+  const [isBroadcastModalOpen, setIsBroadcastModalOpen] = useState(false);
+  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [sendingBroadcast, setSendingBroadcast] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -107,7 +130,12 @@ export default function AdminDashboard() {
           pending_transactions: 0,
           active_cards: 0,
           open_tickets: 0,
-          total_volume_today: 0
+          total_volume_today: 0,
+          pending_loans: 0,
+          active_loans_volume: 0,
+          total_savings_volume: 0,
+          pending_bills_count: 0,
+          total_investments_volume: 0
         });
       } else {
         setStats(rpcStats);
@@ -199,6 +227,45 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleBroadcast = async () => {
+    if (!broadcastMessage.trim()) return;
+
+    try {
+      setSendingBroadcast(true);
+      // 1. Get all user IDs
+      const { data: users, error: usersError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('is_admin', false);
+
+      if (usersError) throw usersError;
+
+      if (users && users.length > 0) {
+        // 2. Insert notes for all users
+        const notes = users.map(u => ({
+          user_id: u.id,
+          message: broadcastMessage.trim(),
+          is_read: false
+        }));
+
+        const { error: insertError } = await supabase
+          .from('admin_notes')
+          .insert(notes);
+
+        if (insertError) throw insertError;
+      }
+
+      toast.success(`Broadcast sent to ${users?.length || 0} users`);
+      setIsBroadcastModalOpen(false);
+      setBroadcastMessage('');
+    } catch (err) {
+      console.error('Error sending broadcast:', err);
+      toast.error('Failed to send broadcast');
+    } finally {
+      setSendingBroadcast(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -209,9 +276,26 @@ export default function AdminDashboard() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold text-slate-900">Admin Command Center</h1>
-        <p className="text-slate-500 font-medium">Overview of system health and pending actions.</p>
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900">Admin Command Center</h1>
+          <p className="text-slate-500 font-medium">Overview of system health and pending actions.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => setIsBroadcastModalOpen(true)}
+            className="flex items-center gap-2 px-6 py-3 bg-[#007856] text-white font-bold rounded-2xl hover:bg-[#006045] transition-all shadow-lg shadow-emerald-200"
+          >
+            <Bell className="w-5 h-5" />
+            System Broadcast
+          </button>
+          <button 
+            onClick={fetchData}
+            className="p-3 bg-white border border-slate-200 text-slate-600 rounded-2xl hover:bg-slate-50 transition-colors"
+          >
+            <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {/* Stats Grid */}
@@ -275,18 +359,90 @@ export default function AdminDashboard() {
           </div>
           <p className="text-3xl font-bold text-slate-900">{stats.open_tickets}</p>
         </div>
+
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <div className="flex items-center gap-4 mb-4">
+            <div className="p-3 bg-amber-50 rounded-2xl">
+              <Clock className="w-6 h-6 text-amber-600" />
+            </div>
+            <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Pending Loans</span>
+          </div>
+          <p className="text-3xl font-bold text-slate-900">{stats.pending_loans}</p>
+        </div>
+
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <div className="flex items-center gap-4 mb-4">
+            <div className="p-3 bg-emerald-50 rounded-2xl">
+              <ArrowUpRight className="w-6 h-6 text-emerald-600" />
+            </div>
+            <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Active Loans</span>
+          </div>
+          <p className="text-3xl font-bold text-slate-900">${stats.active_loans_volume.toLocaleString()}</p>
+        </div>
+
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <div className="flex items-center gap-4 mb-4">
+            <div className="p-3 bg-blue-50 rounded-2xl">
+              <Wallet className="w-6 h-6 text-blue-600" />
+            </div>
+            <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Total Savings</span>
+          </div>
+          <p className="text-3xl font-bold text-slate-900">${stats.total_savings_volume.toLocaleString()}</p>
+        </div>
+
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <div className="flex items-center gap-4 mb-4">
+            <div className="p-3 bg-rose-50 rounded-2xl">
+              <Receipt className="w-6 h-6 text-rose-600" />
+            </div>
+            <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Pending Bills</span>
+          </div>
+          <p className="text-3xl font-bold text-slate-900">{stats.pending_bills_count}</p>
+        </div>
+
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <div className="flex items-center gap-4 mb-4">
+            <div className="p-3 bg-emerald-50 rounded-2xl">
+              <LineChart className="w-6 h-6 text-emerald-600" />
+            </div>
+            <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Investment Volume</span>
+          </div>
+          <p className="text-3xl font-bold text-slate-900">${stats.total_investments_volume.toLocaleString()}</p>
+        </div>
       </div>
 
-      {/* Pending Transactions */}
+      {/* Transactions Section */}
       <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-50 flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-900">Pending Approvals</h2>
-          <button 
-            onClick={fetchData}
-            className="text-xs font-bold text-[#007856] hover:underline"
-          >
-            Refresh List
-          </button>
+          <div className="flex items-center gap-6">
+            <button 
+              onClick={() => setActiveTab('pending')}
+              className={`text-xl font-bold transition-colors ${activeTab === 'pending' ? 'text-slate-900' : 'text-slate-300 hover:text-slate-400'}`}
+            >
+              Pending Approvals
+            </button>
+            <button 
+              onClick={() => setActiveTab('recent')}
+              className={`text-xl font-bold transition-colors ${activeTab === 'recent' ? 'text-slate-900' : 'text-slate-300 hover:text-slate-400'}`}
+            >
+              Recent Activity
+            </button>
+          </div>
+          <div className="flex items-center gap-4">
+            <Link 
+              to="/admin/transactions"
+              className="text-xs font-bold text-[#007856] hover:text-[#006045] flex items-center gap-1 uppercase tracking-widest"
+            >
+              View All <ArrowRight className="w-3 h-3" />
+            </Link>
+            <button 
+              onClick={fetchData}
+              className="p-2 text-slate-400 hover:text-[#007856] transition-colors"
+              title="Refresh"
+            >
+              <Clock className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -301,36 +457,101 @@ export default function AdminDashboard() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {pendingTransactions.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-slate-400 font-medium">
-                    No pending transactions found.
-                  </td>
-                </tr>
+              {activeTab === 'pending' ? (
+                pendingTransactions.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-12 text-center text-slate-400 font-medium">
+                      No pending transactions found.
+                    </td>
+                  </tr>
+                ) : (
+                  pendingTransactions.map((tx) => (
+                    <tr key={tx.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col">
+                          <span className="text-sm font-bold text-slate-900">{tx.profiles?.full_name}</span>
+                          <span className="text-xs text-slate-500">{tx.profiles?.email}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`text-sm font-bold ${tx.amount > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                          {tx.amount > 0 ? '+' : ''}${Math.abs(tx.amount).toLocaleString()}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-sm text-slate-600 font-medium">{tx.description}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">
+                          {format(new Date(tx.created_at), 'MMM dd, yyyy')}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button 
+                            onClick={() => fetchDetails(tx)}
+                            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                            title="View Details"
+                          >
+                            <Eye className="w-5 h-5" />
+                          </button>
+                          <button 
+                            onClick={() => handleTransactionAction(tx.id, 'rejected')}
+                            className="p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
+                            title="Reject"
+                          >
+                            <XCircle className="w-5 h-5" />
+                          </button>
+                          <button 
+                            onClick={() => handleTransactionAction(tx.id, 'released')}
+                            className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors"
+                            title="Approve"
+                          >
+                            <CheckCircle2 className="w-5 h-5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )
               ) : (
-                pendingTransactions.map((tx) => (
-                  <tr key={tx.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="flex flex-col">
-                        <span className="text-sm font-bold text-slate-900">{tx.profiles?.full_name}</span>
-                        <span className="text-xs text-slate-500">{tx.profiles?.email}</span>
-                      </div>
+                recentTransactions.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-12 text-center text-slate-400 font-medium">
+                      No recent activity found.
                     </td>
-                    <td className="px-6 py-4">
-                      <span className={`text-sm font-bold ${tx.amount > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                        {tx.amount > 0 ? '+' : ''}${Math.abs(tx.amount).toLocaleString()}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-sm text-slate-600 font-medium">{tx.description}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">
-                        {format(new Date(tx.created_at), 'MMM dd, yyyy')}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
+                  </tr>
+                ) : (
+                  recentTransactions.map((tx) => (
+                    <tr key={tx.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col">
+                          <span className="text-sm font-bold text-slate-900">{tx.profiles?.full_name}</span>
+                          <span className="text-xs text-slate-500">{tx.profiles?.email}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`text-sm font-bold ${tx.amount > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                          {tx.amount > 0 ? '+' : ''}${Math.abs(tx.amount).toLocaleString()}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col">
+                          <span className="text-sm text-slate-600 font-medium">{tx.description}</span>
+                          <span className={`text-[10px] font-bold uppercase tracking-widest ${
+                            tx.status === 'released' ? 'text-emerald-500' : 
+                            tx.status === 'pending' ? 'text-amber-500' : 'text-rose-500'
+                          }`}>
+                            {tx.status}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">
+                          {format(new Date(tx.created_at), 'MMM dd, yyyy')}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right">
                         <button 
                           onClick={() => fetchDetails(tx)}
                           className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
@@ -338,24 +559,10 @@ export default function AdminDashboard() {
                         >
                           <Eye className="w-5 h-5" />
                         </button>
-                        <button 
-                          onClick={() => handleTransactionAction(tx.id, 'rejected')}
-                          className="p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
-                          title="Reject"
-                        >
-                          <XCircle className="w-5 h-5" />
-                        </button>
-                        <button 
-                          onClick={() => handleTransactionAction(tx.id, 'released')}
-                          className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors"
-                          title="Approve"
-                        >
-                          <CheckCircle2 className="w-5 h-5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                    </tr>
+                  ))
+                )
               )}
             </tbody>
           </table>
@@ -503,6 +710,62 @@ export default function AdminDashboard() {
                     </span>
                   </div>
                 )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* Broadcast Modal */}
+      <AnimatePresence>
+        {isBroadcastModalOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white w-full max-w-md rounded-[32px] shadow-2xl overflow-hidden"
+            >
+              <div className="p-8">
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-xl font-bold text-slate-900">System Broadcast</h2>
+                  <button 
+                    onClick={() => setIsBroadcastModalOpen(false)}
+                    className="p-2 hover:bg-slate-100 rounded-full transition-colors"
+                  >
+                    <X className="w-5 h-5 text-slate-400" />
+                  </button>
+                </div>
+
+                <div className="space-y-6">
+                  <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100">
+                    <div className="flex gap-3">
+                      <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                      <p className="text-xs text-amber-800 font-medium leading-relaxed">
+                        This message will be sent to ALL non-admin users. Use this for important bank-wide notifications.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Broadcast Message</label>
+                    <textarea 
+                      value={broadcastMessage}
+                      onChange={(e) => setBroadcastMessage(e.target.value)}
+                      rows={4}
+                      className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl text-sm font-medium focus:ring-2 focus:ring-[#007856]/20 transition-all resize-none"
+                      placeholder="Type your broadcast message here..."
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleBroadcast}
+                    disabled={sendingBroadcast || !broadcastMessage.trim()}
+                    className="w-full py-4 bg-[#007856] text-white font-bold rounded-2xl hover:bg-[#006045] transition-all shadow-lg shadow-emerald-200 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {sendingBroadcast ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+                    Send Broadcast
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>

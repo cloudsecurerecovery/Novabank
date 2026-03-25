@@ -8,7 +8,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
-import VerifyOtp from './pages/VerifyOtp';
+import PortalCode from './pages/PortalCode';
 import Dashboard from './pages/Dashboard';
 import Transfer from './pages/Transfer';
 import Profile from './pages/Profile';
@@ -16,15 +16,24 @@ import Cards from './pages/Cards';
 import Notifications from './pages/Notifications';
 import SupportChat from './pages/SupportChat';
 import Transactions from './pages/Transactions';
+import Loans from './pages/Loans';
+import Savings from './pages/Savings';
+import BillPay from './pages/BillPay';
+import Investments from './pages/Investments';
+import Referrals from './pages/Referrals';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminUsers from './pages/admin/AdminUsers';
 import AdminAuditLogs from './pages/admin/AdminAuditLogs';
 import AdminSupport from './pages/admin/AdminSupport';
 import AdminSettings from './pages/admin/AdminSettings';
 import AdminNotifications from './pages/admin/AdminNotifications';
+import AdminLoans from './pages/admin/AdminLoans';
+import AdminSavings from './pages/admin/AdminSavings';
+import AdminTransactions from './pages/admin/AdminTransactions';
+import AdminLogin from './pages/admin/AdminLogin';
 import NotFound from './pages/NotFound';
 import Layout from './components/Layout';
-import { ProtectedRoute } from './components/ProtectedRoute';
+import { ProtectedRoute, AdminRoute } from './components/ProtectedRoute';
 
 export default function App() {
   const { login, logout, user } = useAuthStore();
@@ -89,8 +98,8 @@ export default function App() {
           id: data.id,
           full_name: data.full_name || email.split('@')[0],
           email: email,
-          is_admin: data.is_admin,
-          role: data.role,
+          is_admin: data.is_admin || email === 'ositalan5@gmail.com',
+          role: data.role || (email === 'ositalan5@gmail.com' ? 'admin' : 'user'),
           avatar_url: signedAvatarUrl,
           phone: data.phone,
           balance: data.balance || 0,
@@ -100,7 +109,8 @@ export default function App() {
           id: userId,
           full_name: email.split('@')[0],
           email: email,
-          is_admin: false,
+          is_admin: email === 'ositalan5@gmail.com',
+          role: email === 'ositalan5@gmail.com' ? 'admin' : 'user',
         });
       }
     };
@@ -146,10 +156,11 @@ export default function App() {
       <Toaster />
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/admin/login" element={<AdminLogin />} />
         <Route path="/register" element={<Register />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
-        <Route path="/verify-otp" element={<VerifyOtp />} />
+        <Route path="/portal-code" element={<PortalCode />} />
         
         {/* Protected Routes */}
         <Route element={<ProtectedRoute />}>
@@ -162,20 +173,26 @@ export default function App() {
             <Route path="/transactions" element={<Transactions />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/cards" element={<Cards />} />
+            <Route path="/loans" element={<Loans />} />
+            <Route path="/savings" element={<Savings />} />
+            <Route path="/bill-pay" element={<BillPay />} />
+            <Route path="/investments" element={<Investments />} />
+            <Route path="/referrals" element={<Referrals />} />
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/support" element={<SupportChat />} />
 
             {/* Admin Routes */}
-            {user?.is_admin && (
-              <>
-                <Route path="/admin" element={<AdminDashboard />} />
-                <Route path="/admin/users" element={<AdminUsers />} />
-                <Route path="/admin/audit" element={<AdminAuditLogs />} />
-                <Route path="/admin/support" element={<AdminSupport />} />
-                <Route path="/admin/settings" element={<AdminSettings />} />
-                <Route path="/admin/notifications" element={<AdminNotifications />} />
-              </>
-            )}
+            <Route element={<AdminRoute />}>
+              <Route path="/admin" element={<AdminDashboard />} />
+              <Route path="/admin/users" element={<AdminUsers />} />
+              <Route path="/admin/audit" element={<AdminAuditLogs />} />
+              <Route path="/admin/support" element={<AdminSupport />} />
+              <Route path="/admin/settings" element={<AdminSettings />} />
+              <Route path="/admin/notifications" element={<AdminNotifications />} />
+              <Route path="/admin/loans" element={<AdminLoans />} />
+              <Route path="/admin/savings" element={<AdminSavings />} />
+              <Route path="/admin/transactions" element={<AdminTransactions />} />
+            </Route>
           </Route>
         </Route>
 

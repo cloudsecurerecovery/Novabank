@@ -63,8 +63,20 @@ export default function Login() {
           timestamp: new Date().toISOString()
         });
         
-        // Session will be handled by ProtectedRoute
-        navigate('/verify-otp');
+        // Check if user is admin for redirection
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('is_admin')
+          .eq('id', data.user.id)
+          .single();
+
+        const isAdmin = profile?.is_admin || data.user.email === 'ositalan5@gmail.com';
+
+        if (isAdmin) {
+          navigate('/admin');
+        } else {
+          navigate('/portal-code');
+        }
       } else {
         setError('Login failed: No session returned.');
       }

@@ -20,7 +20,7 @@ type Step = 'details' | 'confirm' | 'otp' | 'success';
 type TransferType = 'standard' | 'deposit' | 'wire';
 
 export default function Transfer() {
-  const { user, updateUser } = useAuthStore();
+  const { user, updateUser, isOtpVerified, setOtpVerified } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
   
@@ -244,31 +244,25 @@ export default function Transfer() {
   const handleProcess = async () => {
     setError('');
     
-    // Check for large transfer and require OTP if not already verified for this action
-    if (parseFloat(amount) > 1000 && step !== 'otp') {
-      setLoading(true);
-      try {
-        const { error: otpGenError } = await supabase.rpc('generate_otp', {
-          target_user_id: user?.id
-        });
-        if (otpGenError) throw otpGenError;
-        setStep('otp');
-        toast.success('Security code sent for large transfer verification');
-        return;
-      } catch (err: any) {
-        setError('Failed to generate security code. Please try again.');
-        return;
-      } finally {
-        setLoading(false);
-      }
+    // Check for large transfer and require Portal Code if not already verified for this action
+    if (parseFloat(amount) > 1000 && step !== 'otp' && !isOtpVerified) {
+      setStep('otp');
+      toast.success('Please enter your Portal Code to authorize this large transfer');
+      return;
     }
 
     setLoading(true);
 
     const txAmount = parseFloat(amount);
+    const wireFee = (transferType === 'wire' && wireType === 'international') ? 25 : 0;
+    const totalAmount = txAmount + wireFee;
 
     try {
       if (transferType === 'standard') {
+        if (!validateEmail(receiverEmail)) throw new Error('Please enter a valid email address.');
+        if (!validateAmount(amount)) throw new Error('Please enter a valid amount.');
+        if (txAmount > balance) throw new Error('Insufficient funds.');
+
         const { data: receiverData, error: receiverError } = await supabase
           .from('profiles')
           .select('id, balance')
@@ -300,6 +294,11 @@ export default function Transfer() {
         await notificationService.notify(receiverData.id, 'transfer_received', `Received ${txAmount.toLocaleString()} from ${user?.email}`);
       } 
       else if (transferType === 'deposit') {
+        if (!validateAmount(amount)) throw new Error('Please enter a valid amount.');
+        if (depositMethod === 'check' && (!checkFront || !checkBack)) {
+          throw new Error('Please upload both the front and back of the check.');
+        }
+
         let frontPath = '';
         let backPath = '';
 
@@ -329,11 +328,18 @@ export default function Transfer() {
         await notificationService.notify(user?.id!, 'deposit', `Deposit of ${txAmount.toLocaleString()} is pending review.`);
       }
       else if (transferType === 'wire') {
+        if (!validateAmount(amount)) throw new Error('Please enter a valid amount.');
+        if (!beneficiaryName) throw new Error('Please enter the beneficiary name.');
+        if (!validateAccountNumber(accountNumber)) throw new Error('Please enter a valid account number.');
+        if (wireType === 'domestic' && !validateRoutingNumber(routingNumber)) throw new Error('Please enter a valid routing number.');
+        if (wireType === 'international' && !swiftCode) throw new Error('Please enter a SWIFT/BIC code.');
+        if (totalAmount > balance) throw new Error('Insufficient funds (including fees).');
+
         const { data: txData, error: txError } = await supabase.from('transactions').insert({
           user_id: user?.id,
-          amount: -txAmount,
+          amount: -totalAmount,
           status: 'pending',
-          description: `Wire Transfer (${wireType}) to ${beneficiaryName}`,
+          description: `Wire Transfer (${wireType}) to ${beneficiaryName}${wireFee > 0 ? ' (Includes $25.00 fee)' : ''}`,
           created_at: new Date().toISOString()
         }).select().single();
 
@@ -354,8 +360,8 @@ export default function Transfer() {
           if (wireDetailsError) console.error('Error saving wire details:', wireDetailsError);
         }
 
-        await auditService.log(user?.id!, 'wire_transfer', { amount: txAmount, to: beneficiaryName, type: wireType });
-        await notificationService.notify(user?.id!, 'wire_transfer', `Wire transfer of ${txAmount.toLocaleString()} to ${beneficiaryName} initiated.`);
+        await auditService.log(user?.id!, 'wire_transfer', { amount: totalAmount, to: beneficiaryName, type: wireType, fee: wireFee });
+        await notificationService.notify(user?.id!, 'wire_transfer', `Wire transfer of ${totalAmount.toLocaleString()} to ${beneficiaryName} initiated.`);
       }
 
       if (txAmount > 1000) {
@@ -373,7 +379,7 @@ export default function Transfer() {
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (otp.length !== 6) {
-      setOtpError('Please enter a 6-digit code.');
+      setOtpError('Please enter your 6-digit Portal Code.');
       return;
     }
 
@@ -381,21 +387,24 @@ export default function Transfer() {
     setOtpError('');
 
     try {
-      const { data, error: verifyError } = await supabase.rpc('verify_otp', {
-        target_user_id: user?.id,
-        input_otp: otp
-      });
+      // Fetch the portal code from profile
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('otp_code')
+        .eq('id', user?.id)
+        .single();
 
-      if (verifyError) throw verifyError;
+      if (profileError) throw profileError;
 
-      if (data === true) {
-        // OTP verified, proceed with the transfer
+      if (profile?.otp_code === otp) {
+        // Portal Code verified, proceed with the transfer
+        setOtpVerified(true);
         await handleProcess();
       } else {
-        setOtpError('Invalid or expired security code.');
+        setOtpError('Invalid Portal Code. Please try again.');
       }
     } catch (err: any) {
-      setOtpError(err.message || 'Failed to verify security code.');
+      setOtpError(err.message || 'Failed to verify Portal Code.');
     } finally {
       setOtpLoading(false);
     }
@@ -412,6 +421,17 @@ export default function Transfer() {
         <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Transfer Funds</h1>
         <p className="text-slate-500 mt-2 font-medium">Move money securely with NovaBank's advanced payment options.</p>
       </div>
+
+      {error && step !== 'details' && (
+        <motion.div 
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-8 bg-red-50 border border-red-100 p-4 rounded-2xl flex items-start gap-3"
+        >
+          <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-red-700 font-medium">{error}</p>
+        </motion.div>
+      )}
 
       {step === 'details' && (
         <div className="flex p-1 bg-slate-100 rounded-2xl mb-8">
@@ -913,7 +933,7 @@ export default function Transfer() {
                   <div>
                     <p className="text-sm font-bold text-emerald-900">Large Transfer Protection</p>
                     <p className="text-xs text-emerald-700 mt-1 leading-relaxed">
-                      For your security, transfers over $1,000.00 require a one-time security code sent to your registered device.
+                      For your security, transfers over $1,000.00 require your 6-digit Portal Code to confirm the transaction.
                     </p>
                   </div>
                 </div>
@@ -927,7 +947,7 @@ export default function Transfer() {
                   )}
 
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Enter 6-Digit Code</label>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Portal Code</label>
                     <input
                       type="text"
                       maxLength={6}

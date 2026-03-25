@@ -286,7 +286,7 @@ export default function Notifications() {
                           ? 'text-indigo-600 bg-indigo-50' 
                           : 'text-emerald-600 bg-emerald-50'
                       }`}>
-                        {note.type === 'admin_note' ? 'Admin Message' : (note.system_type?.replace('_', ' ') || 'System Alert')}
+                        {note.type === 'admin_note' ? 'Bank Message' : (note.system_type?.replace('_', ' ') || 'System Alert')}
                       </span>
                       <span className="text-xs text-slate-400 font-medium flex items-center gap-1">
                         <Clock className="w-3 h-3" />
@@ -320,7 +320,7 @@ export default function Notifications() {
         <div>
           <h4 className="text-sm font-bold text-emerald-900">Security Tip</h4>
           <p className="text-sm text-emerald-800/80 mt-1 leading-relaxed">
-            NovaBank will never ask for your password or OTP over the phone. If you receive a suspicious message, please report it to our support team immediately.
+            NovaBank will never ask for your password or Portal Code over the phone. If you receive a suspicious message, please report it to our support team immediately.
           </p>
         </div>
       </div>
