@@ -31,6 +31,7 @@ import AdminNotifications from './pages/admin/AdminNotifications';
 import AdminLoans from './pages/admin/AdminLoans';
 import AdminSavings from './pages/admin/AdminSavings';
 import AdminTransactions from './pages/admin/AdminTransactions';
+import AdminInvestments from './pages/admin/AdminInvestments';
 import AdminLogin from './pages/admin/AdminLogin';
 import NotFound from './pages/NotFound';
 import Layout from './components/Layout';
@@ -196,6 +197,7 @@ export default function App() {
               <Route path="/admin/loans" element={<AdminLoans />} />
               <Route path="/admin/savings" element={<AdminSavings />} />
               <Route path="/admin/transactions" element={<AdminTransactions />} />
+              <Route path="/admin/investments" element={<AdminInvestments />} />
             </Route>
           </Route>
         </Route>

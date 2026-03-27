@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS profiles (
   phone TEXT,
   avatar_url TEXT,
   balance NUMERIC DEFAULT 0,
+  savings_balance NUMERIC DEFAULT 0,
+  loan_balance NUMERIC DEFAULT 0,
+  investment_balance NUMERIC DEFAULT 0,
   is_admin BOOLEAN DEFAULT FALSE,
   role TEXT DEFAULT 'user',
   account_status TEXT DEFAULT 'active' CHECK (account_status IN ('active', 'frozen', 'blocked', 'pending_kyc')),
@@ -35,6 +38,8 @@ CREATE TABLE IF NOT EXISTS transactions (
   description TEXT,
   admin_notes TEXT,
   resulting_balance NUMERIC,
+  balance_type TEXT DEFAULT 'checking' CHECK (balance_type IN ('checking', 'savings', 'loan', 'investment')),
+  type TEXT CHECK (type IN ('credit', 'debit')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
 );
 
@@ -142,7 +147,8 @@ CREATE OR REPLACE FUNCTION transfer_funds(
   receiver_id UUID,
   transfer_amount NUMERIC,
   sender_description TEXT,
-  receiver_description TEXT
+  receiver_description TEXT,
+  sender_balance_type TEXT DEFAULT 'checking'
 ) RETURNS BOOLEAN AS $$
 DECLARE
   current_balance NUMERIC;
@@ -168,13 +174,21 @@ BEGIN
   END IF;
 
   -- Get current balance from profiles (centralized source of truth)
-  SELECT balance INTO current_balance
-  FROM profiles
-  WHERE id = sender_id;
+  IF sender_balance_type = 'checking' THEN
+    SELECT balance INTO current_balance FROM profiles WHERE id = sender_id;
+  ELSIF sender_balance_type = 'savings' THEN
+    SELECT savings_balance INTO current_balance FROM profiles WHERE id = sender_id;
+  ELSIF sender_balance_type = 'loan' THEN
+    SELECT loan_balance INTO current_balance FROM profiles WHERE id = sender_id;
+  ELSIF sender_balance_type = 'investment' THEN
+    SELECT investment_balance INTO current_balance FROM profiles WHERE id = sender_id;
+  ELSE
+    RAISE EXCEPTION 'Invalid balance type: %', sender_balance_type;
+  END IF;
 
   -- Check sufficient funds
   IF current_balance < transfer_amount THEN
-    RAISE EXCEPTION 'Insufficient funds: Your available balance is %', current_balance;
+    RAISE EXCEPTION 'Insufficient funds in % account: Your available balance is %', sender_balance_type, current_balance;
   END IF;
 
   -- Validation: Check daily limit
@@ -194,12 +208,12 @@ BEGIN
 
   -- Atomic Transaction: Debit Sender
   -- The trigger 'on_transaction_change' will automatically update profiles.balance
-  INSERT INTO transactions (user_id, amount, status, description)
-  VALUES (sender_id, -transfer_amount, 'released', sender_description);
+  INSERT INTO transactions (user_id, amount, status, description, balance_type, type)
+  VALUES (sender_id, -transfer_amount, 'released', sender_description, sender_balance_type, 'debit');
 
   -- Atomic Transaction: Credit Receiver
-  INSERT INTO transactions (user_id, amount, status, description)
-  VALUES (receiver_id, transfer_amount, 'released', receiver_description);
+  INSERT INTO transactions (user_id, amount, status, description, balance_type, type)
+  VALUES (receiver_id, transfer_amount, 'released', receiver_description, 'checking', 'credit');
 
   RETURN TRUE;
 EXCEPTION
@@ -371,8 +385,15 @@ BEGIN
   
   -- INSERT
   IF (TG_OP = 'INSERT' AND NEW.status = 'released') THEN
-    UPDATE profiles SET balance = balance + NEW.amount WHERE id = NEW.user_id
-    RETURNING balance INTO new_balance;
+    IF NEW.balance_type = 'checking' THEN
+      UPDATE profiles SET balance = balance + NEW.amount WHERE id = NEW.user_id RETURNING balance INTO new_balance;
+    ELSIF NEW.balance_type = 'savings' THEN
+      UPDATE profiles SET savings_balance = COALESCE(savings_balance, 0) + NEW.amount WHERE id = NEW.user_id RETURNING savings_balance INTO new_balance;
+    ELSIF NEW.balance_type = 'loan' THEN
+      UPDATE profiles SET loan_balance = COALESCE(loan_balance, 0) + NEW.amount WHERE id = NEW.user_id RETURNING loan_balance INTO new_balance;
+    ELSIF NEW.balance_type = 'investment' THEN
+      UPDATE profiles SET investment_balance = COALESCE(investment_balance, 0) + NEW.amount WHERE id = NEW.user_id RETURNING investment_balance INTO new_balance;
+    END IF;
     
     -- Update the transaction with the resulting balance
     UPDATE transactions SET resulting_balance = new_balance WHERE id = NEW.id;
@@ -381,29 +402,58 @@ BEGIN
   ELSIF (TG_OP = 'UPDATE') THEN
     -- Status changed to released
     IF (OLD.status != 'released' AND NEW.status = 'released') THEN
-      UPDATE profiles SET balance = balance + NEW.amount WHERE id = NEW.user_id
-      RETURNING balance INTO new_balance;
+      IF NEW.balance_type = 'checking' THEN
+        UPDATE profiles SET balance = balance + NEW.amount WHERE id = NEW.user_id RETURNING balance INTO new_balance;
+      ELSIF NEW.balance_type = 'savings' THEN
+        UPDATE profiles SET savings_balance = COALESCE(savings_balance, 0) + NEW.amount WHERE id = NEW.user_id RETURNING savings_balance INTO new_balance;
+      ELSIF NEW.balance_type = 'loan' THEN
+        UPDATE profiles SET loan_balance = COALESCE(loan_balance, 0) + NEW.amount WHERE id = NEW.user_id RETURNING loan_balance INTO new_balance;
+      ELSIF NEW.balance_type = 'investment' THEN
+        UPDATE profiles SET investment_balance = COALESCE(investment_balance, 0) + NEW.amount WHERE id = NEW.user_id RETURNING investment_balance INTO new_balance;
+      END IF;
       
       UPDATE transactions SET resulting_balance = new_balance WHERE id = NEW.id;
       
     -- Status changed FROM released
     ELSIF (OLD.status = 'released' AND NEW.status != 'released') THEN
-      UPDATE profiles SET balance = balance - OLD.amount WHERE id = OLD.user_id
-      RETURNING balance INTO new_balance;
+      IF OLD.balance_type = 'checking' THEN
+        UPDATE profiles SET balance = balance - OLD.amount WHERE id = OLD.user_id RETURNING balance INTO new_balance;
+      ELSIF OLD.balance_type = 'savings' THEN
+        UPDATE profiles SET savings_balance = COALESCE(savings_balance, 0) - OLD.amount WHERE id = OLD.user_id RETURNING savings_balance INTO new_balance;
+      ELSIF OLD.balance_type = 'loan' THEN
+        UPDATE profiles SET loan_balance = COALESCE(loan_balance, 0) - OLD.amount WHERE id = OLD.user_id RETURNING loan_balance INTO new_balance;
+      ELSIF OLD.balance_type = 'investment' THEN
+        UPDATE profiles SET investment_balance = COALESCE(investment_balance, 0) - OLD.amount WHERE id = OLD.user_id RETURNING investment_balance INTO new_balance;
+      END IF;
       
       UPDATE transactions SET resulting_balance = new_balance WHERE id = NEW.id;
       
     -- Amount changed while remaining released
     ELSIF (OLD.status = 'released' AND NEW.status = 'released' AND OLD.amount != NEW.amount) THEN
-      UPDATE profiles SET balance = balance - OLD.amount + NEW.amount WHERE id = NEW.user_id
-      RETURNING balance INTO new_balance;
+      IF NEW.balance_type = 'checking' THEN
+        UPDATE profiles SET balance = balance - OLD.amount + NEW.amount WHERE id = NEW.user_id RETURNING balance INTO new_balance;
+      ELSIF NEW.balance_type = 'savings' THEN
+        UPDATE profiles SET savings_balance = COALESCE(savings_balance, 0) - OLD.amount + NEW.amount WHERE id = NEW.user_id RETURNING savings_balance INTO new_balance;
+      ELSIF NEW.balance_type = 'loan' THEN
+        UPDATE profiles SET loan_balance = COALESCE(loan_balance, 0) - OLD.amount + NEW.amount WHERE id = NEW.user_id RETURNING loan_balance INTO new_balance;
+      ELSIF NEW.balance_type = 'investment' THEN
+        UPDATE profiles SET investment_balance = COALESCE(investment_balance, 0) - OLD.amount + NEW.amount WHERE id = NEW.user_id RETURNING investment_balance INTO new_balance;
+      END IF;
       
       UPDATE transactions SET resulting_balance = new_balance WHERE id = NEW.id;
     END IF;
     
   -- DELETE
   ELSIF (TG_OP = 'DELETE' AND OLD.status = 'released') THEN
-    UPDATE profiles SET balance = balance - OLD.amount WHERE id = OLD.user_id;
+    IF OLD.balance_type = 'checking' THEN
+      UPDATE profiles SET balance = balance - OLD.amount WHERE id = OLD.user_id;
+    ELSIF OLD.balance_type = 'savings' THEN
+      UPDATE profiles SET savings_balance = COALESCE(savings_balance, 0) - OLD.amount WHERE id = OLD.user_id;
+    ELSIF OLD.balance_type = 'loan' THEN
+      UPDATE profiles SET loan_balance = COALESCE(loan_balance, 0) - OLD.amount WHERE id = OLD.user_id;
+    ELSIF OLD.balance_type = 'investment' THEN
+      UPDATE profiles SET investment_balance = COALESCE(investment_balance, 0) - OLD.amount WHERE id = OLD.user_id;
+    END IF;
   END IF;
   
   RETURN NULL;
@@ -1072,7 +1122,25 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- P. Admin Pay Bill RPC
+-- P. Admin Update Investment Price RPC
+CREATE OR REPLACE FUNCTION admin_update_investment_price(
+  target_symbol TEXT,
+  new_price NUMERIC
+) RETURNS VOID AS $$
+BEGIN
+  -- Check if admin
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true) THEN
+    RAISE EXCEPTION 'Unauthorized: Admin access required';
+  END IF;
+
+  UPDATE investments
+  SET current_price = new_price,
+      updated_at = NOW()
+  WHERE asset_symbol = target_symbol;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Q. Admin Pay Bill RPC
 CREATE OR REPLACE FUNCTION admin_pay_bill(
   target_bill_id UUID
 ) RETURNS BOOLEAN AS $$
@@ -1135,22 +1203,10 @@ BEGIN
     RAISE EXCEPTION 'Unauthorized: Only admins can adjust balances';
   END IF;
 
-  -- Update the appropriate balance
-  IF balance_type = 'checking' THEN
-    UPDATE profiles SET balance = balance + amount WHERE id = target_user_id;
-  ELSIF balance_type = 'savings' THEN
-    UPDATE profiles SET savings_balance = COALESCE(savings_balance, 0) + amount WHERE id = target_user_id;
-  ELSIF balance_type = 'loan' THEN
-    UPDATE profiles SET loan_balance = COALESCE(loan_balance, 0) + amount WHERE id = target_user_id;
-  ELSIF balance_type = 'investment' THEN
-    UPDATE profiles SET investment_balance = COALESCE(investment_balance, 0) + amount WHERE id = target_user_id;
-  ELSE
-    RAISE EXCEPTION 'Invalid balance type';
-  END IF;
-
   -- Insert transaction record
-  INSERT INTO transactions (user_id, amount, status, description, type)
-  VALUES (target_user_id, amount, 'released', description, CASE WHEN amount >= 0 THEN 'credit' ELSE 'debit' END);
+  -- The trigger 'on_transaction_change' will automatically update the appropriate balance in profiles
+  INSERT INTO transactions (user_id, amount, status, description, type, balance_type)
+  VALUES (target_user_id, amount, 'released', description, CASE WHEN amount >= 0 THEN 'credit' ELSE 'debit' END, balance_type);
 
   RETURN TRUE;
 END;
@@ -1173,19 +1229,15 @@ BEGIN
     RAISE EXCEPTION 'Unauthorized: Only admins can set balances';
   END IF;
 
-  -- Get old balance and update
+  -- Get old balance
   IF balance_type = 'checking' THEN
     SELECT balance INTO old_balance FROM profiles WHERE id = target_user_id;
-    UPDATE profiles SET balance = new_balance WHERE id = target_user_id;
   ELSIF balance_type = 'savings' THEN
     SELECT COALESCE(savings_balance, 0) INTO old_balance FROM profiles WHERE id = target_user_id;
-    UPDATE profiles SET savings_balance = new_balance WHERE id = target_user_id;
   ELSIF balance_type = 'loan' THEN
     SELECT COALESCE(loan_balance, 0) INTO old_balance FROM profiles WHERE id = target_user_id;
-    UPDATE profiles SET loan_balance = new_balance WHERE id = target_user_id;
   ELSIF balance_type = 'investment' THEN
     SELECT COALESCE(investment_balance, 0) INTO old_balance FROM profiles WHERE id = target_user_id;
-    UPDATE profiles SET investment_balance = new_balance WHERE id = target_user_id;
   ELSE
     RAISE EXCEPTION 'Invalid balance type';
   END IF;
@@ -1193,9 +1245,10 @@ BEGIN
   diff := new_balance - old_balance;
 
   -- Insert transaction record for the difference
+  -- The trigger 'on_transaction_change' will automatically update the appropriate balance in profiles
   IF diff <> 0 THEN
-    INSERT INTO transactions (user_id, amount, status, description, type)
-    VALUES (target_user_id, diff, 'released', 'Admin Balance Correction (' || balance_type || ')', CASE WHEN diff >= 0 THEN 'credit' ELSE 'debit' END);
+    INSERT INTO transactions (user_id, amount, status, description, type, balance_type)
+    VALUES (target_user_id, diff, 'released', 'Admin Balance Correction (' || balance_type || ')', CASE WHEN diff >= 0 THEN 'credit' ELSE 'debit' END, balance_type);
   END IF;
 
   RETURN TRUE;
@@ -1221,6 +1274,11 @@ CREATE POLICY "Admins have full access to bill payments" ON bill_payments
 -- Investments
 CREATE POLICY "Users can manage their own investments" ON investments
   FOR ALL USING (auth.uid() = user_id);
+
+CREATE POLICY "Admins can manage all investments" ON investments
+  FOR ALL USING (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
+  );
 
 -- Referrals
 CREATE POLICY "Users can view their own referrals" ON referrals

@@ -104,6 +104,7 @@ export default function Layout() {
     { name: 'Broadcast', path: '/admin/notifications', icon: Bell },
     { name: 'Loans', path: '/admin/loans', icon: Banknote },
     { name: 'Savings', path: '/admin/savings', icon: PiggyBank },
+    { name: 'Investments', path: '/admin/investments', icon: LineChart },
     { name: 'Settings', path: '/admin/settings', icon: Settings },
   ];
 

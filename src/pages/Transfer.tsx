@@ -40,10 +40,19 @@ export default function Transfer() {
     setStep('details'); // Reset to details step when switching types via URL
   }, [location.pathname]);
 
+  const [isConfirmed, setIsConfirmed] = useState(false);
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [balance, setBalance] = useState(user?.balance || 0);
+  const [sourceAccount, setSourceAccount] = useState<'checking' | 'savings' | 'loan' | 'investment'>('checking');
+  const [balances, setBalances] = useState({
+    checking: user?.balance || 0,
+    savings: user?.savings_balance || 0,
+    loan: user?.loan_balance || 0,
+    investment: user?.investment_balance || 0
+  });
+
+  const currentBalance = balances[sourceAccount];
 
   // Standard Transfer State
   const [receiverEmail, setReceiverEmail] = useState('');
@@ -73,33 +82,54 @@ export default function Transfer() {
   const [otpError, setOtpError] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
 
-  const fetchBalance = useCallback(async () => {
+  const fetchBalances = useCallback(async () => {
     if (!user) return;
     
-    // Fetch directly from profiles table for the most accurate balance
+    // Fetch directly from profiles table for the most accurate balances
     const { data: profileData, error: profileError } = await supabase
       .from('profiles')
-      .select('balance')
+      .select('balance, savings_balance, loan_balance, investment_balance')
       .eq('id', user.id)
       .single();
 
     if (!profileError && profileData) {
-      setBalance(profileData.balance || 0);
-      updateUser({ balance: profileData.balance || 0 });
+      const newBalances = {
+        checking: profileData.balance || 0,
+        savings: profileData.savings_balance || 0,
+        loan: profileData.loan_balance || 0,
+        investment: profileData.investment_balance || 0
+      };
+      setBalances(newBalances);
+      updateUser({
+        balance: profileData.balance || 0,
+        savings_balance: profileData.savings_balance || 0,
+        loan_balance: profileData.loan_balance || 0,
+        investment_balance: profileData.investment_balance || 0
+      });
       return;
     }
 
     // Fallback to transaction calculation if profile balance fails
     const { data, error } = await supabase
       .from('transactions')
-      .select('amount')
+      .select('amount, balance_type')
       .eq('user_id', user.id)
       .eq('status', 'released');
       
     if (!error && data) {
-      const calcBalance = data.reduce((sum, tx) => sum + Number(tx.amount), 0);
-      setBalance(calcBalance);
-      updateUser({ balance: calcBalance });
+      const calcBalances = {
+        checking: data.filter(tx => tx.balance_type === 'checking').reduce((sum, tx) => sum + Number(tx.amount), 0),
+        savings: data.filter(tx => tx.balance_type === 'savings').reduce((sum, tx) => sum + Number(tx.amount), 0),
+        loan: data.filter(tx => tx.balance_type === 'loan').reduce((sum, tx) => sum + Number(tx.amount), 0),
+        investment: data.filter(tx => tx.balance_type === 'investment').reduce((sum, tx) => sum + Number(tx.amount), 0)
+      };
+      setBalances(calcBalances);
+      updateUser({
+        balance: calcBalances.checking,
+        savings_balance: calcBalances.savings,
+        loan_balance: calcBalances.loan,
+        investment_balance: calcBalances.investment
+      });
     }
   }, [user, updateUser]);
 
@@ -142,9 +172,9 @@ export default function Transfer() {
   }, [user]);
 
   useEffect(() => {
-    fetchBalance();
+    fetchBalances();
     fetchRecentRecipients();
-  }, [fetchBalance, fetchRecentRecipients]);
+  }, [fetchBalances, fetchRecentRecipients]);
 
   const validateStep = async () => {
     setError('');
@@ -181,7 +211,7 @@ export default function Transfer() {
           throw new Error('You cannot transfer money to yourself.');
         }
 
-        if (parseFloat(amount) > balance) {
+        if (parseFloat(amount) > currentBalance) {
           throw new Error('Insufficient balance for this transfer.');
         }
 
@@ -204,6 +234,7 @@ export default function Transfer() {
         }
 
         setRecipientName(data.full_name);
+        setIsConfirmed(false);
         setStep('confirm');
       } catch (err: any) {
         setError(err.message);
@@ -215,6 +246,7 @@ export default function Transfer() {
         setError('Please upload both front and back images of the check.');
         return;
       }
+      setIsConfirmed(false);
       setStep('confirm');
     } else if (transferType === 'wire') {
       if (!beneficiaryName || !accountNumber || !routingNumber || !bankName) {
@@ -233,10 +265,11 @@ export default function Transfer() {
         setError('SWIFT/BIC code is required for international wires.');
         return;
       }
-      if (parseFloat(amount) > balance) {
+      if (parseFloat(amount) > currentBalance) {
         setError('Insufficient balance for this wire transfer.');
         return;
       }
+      setIsConfirmed(false);
       setStep('confirm');
     }
   };
@@ -261,7 +294,7 @@ export default function Transfer() {
       if (transferType === 'standard') {
         if (!validateEmail(receiverEmail)) throw new Error('Please enter a valid email address.');
         if (!validateAmount(amount)) throw new Error('Please enter a valid amount.');
-        if (txAmount > balance) throw new Error('Insufficient funds.');
+        if (txAmount > currentBalance) throw new Error('Insufficient funds.');
 
         const { data: receiverData, error: receiverError } = await supabase
           .from('profiles')
@@ -276,7 +309,8 @@ export default function Transfer() {
           receiver_id: receiverData.id,
           transfer_amount: txAmount,
           sender_description: `Transfer to ${receiverEmail} - ${description || 'Funds Transfer'}`,
-          receiver_description: `Transfer from ${user?.email} - ${description || 'Funds Transfer'}`
+          receiver_description: `Transfer from ${user?.email} - ${description || 'Funds Transfer'}`,
+          sender_balance_type: sourceAccount
         });
 
         if (txError) throw txError;
@@ -307,6 +341,8 @@ export default function Transfer() {
           amount: txAmount,
           status: 'pending',
           description: `Mobile Deposit - ${depositMethod === 'check' ? 'Check' : 'ACH'}`,
+          balance_type: 'checking',
+          type: 'credit',
           created_at: new Date().toISOString()
         }).select().single();
 
@@ -333,13 +369,15 @@ export default function Transfer() {
         if (!validateAccountNumber(accountNumber)) throw new Error('Please enter a valid account number.');
         if (wireType === 'domestic' && !validateRoutingNumber(routingNumber)) throw new Error('Please enter a valid routing number.');
         if (wireType === 'international' && !swiftCode) throw new Error('Please enter a SWIFT/BIC code.');
-        if (totalAmount > balance) throw new Error('Insufficient funds (including fees).');
+        if (totalAmount > currentBalance) throw new Error('Insufficient funds (including fees).');
 
         const { data: txData, error: txError } = await supabase.from('transactions').insert({
           user_id: user?.id,
           amount: -totalAmount,
           status: 'pending',
           description: `Wire Transfer (${wireType}) to ${beneficiaryName}${wireFee > 0 ? ' (Includes $25.00 fee)' : ''}`,
+          balance_type: sourceAccount,
+          type: 'debit',
           created_at: new Date().toISOString()
         }).select().single();
 
@@ -476,13 +514,25 @@ export default function Transfer() {
           >
             {/* Balance Summary */}
             <div className="bg-gradient-to-br from-[#007856] to-[#006045] rounded-3xl p-6 text-white shadow-lg shadow-emerald-100">
-              <div className="flex items-center gap-3 opacity-80">
-                <Building2 className="w-5 h-5" />
-                <span className="text-sm font-bold uppercase tracking-wider">Primary Checking</span>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3 opacity-80">
+                  <Building2 className="w-5 h-5" />
+                  <span className="text-sm font-bold uppercase tracking-wider">Source Account</span>
+                </div>
+                <select 
+                  value={sourceAccount}
+                  onChange={(e) => setSourceAccount(e.target.value as any)}
+                  className="bg-white/10 border border-white/20 rounded-xl px-3 py-1.5 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-white/30"
+                >
+                  <option value="checking" className="text-slate-900">Checking</option>
+                  <option value="savings" className="text-slate-900">Savings</option>
+                  <option value="loan" className="text-slate-900">Loan</option>
+                  <option value="investment" className="text-slate-900">Investment</option>
+                </select>
               </div>
-              <div className="mt-4">
-                <p className="text-4xl font-bold">${balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-                <p className="text-white/60 text-xs mt-1 font-medium uppercase tracking-widest">Available Balance</p>
+              <div>
+                <p className="text-4xl font-bold">${currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                <p className="text-white/60 text-xs mt-1 font-medium uppercase tracking-widest">Available {sourceAccount} Balance</p>
               </div>
             </div>
 
@@ -826,7 +876,10 @@ export default function Transfer() {
             <div className="p-8">
               <div className="flex items-center gap-4 mb-8">
                 <button 
-                  onClick={() => setStep('details')}
+                  onClick={() => {
+                    setStep('details');
+                    setIsConfirmed(false);
+                  }}
                   className="p-2 rounded-xl hover:bg-slate-100 text-slate-500 transition-colors"
                 >
                   <ArrowLeft className="w-5 h-5" />
@@ -880,20 +933,33 @@ export default function Transfer() {
                   )}
                 </div>
 
-                <div className="bg-emerald-50 rounded-2xl p-4 flex items-start gap-3 border border-emerald-100">
-                  <ShieldCheck className="w-5 h-5 text-emerald-600 mt-0.5" />
-                  <p className="text-xs text-emerald-800 font-medium leading-relaxed">
-                    {transferType === 'deposit' 
-                      ? "Deposits are subject to verification. Funds are typically available within 1-3 business days."
-                      : "This transfer is protected by NovaBank's SecurePay technology. Funds are typically available instantly once released."}
-                  </p>
-                </div>
+        <div className="bg-emerald-50 rounded-2xl p-4 flex items-start gap-3 border border-emerald-100">
+          <ShieldCheck className="w-5 h-5 text-emerald-600 mt-0.5" />
+          <p className="text-xs text-emerald-800 font-medium leading-relaxed">
+            {transferType === 'deposit' 
+              ? "Deposits are subject to verification. Funds are typically available within 1-3 business days."
+              : "This transfer is protected by NovaBank's SecurePay technology. Funds are typically available instantly once released."}
+          </p>
+        </div>
 
-                <button
-                  onClick={handleProcess}
-                  disabled={loading}
-                  className="w-full flex items-center justify-center gap-3 py-5 bg-[#007856] text-white font-bold rounded-2xl hover:bg-[#006045] transition-all shadow-lg shadow-emerald-200 disabled:opacity-50"
-                >
+        <div className="flex items-center gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+          <input
+            type="checkbox"
+            id="confirm-transfer"
+            checked={isConfirmed}
+            onChange={(e) => setIsConfirmed(e.target.checked)}
+            className="w-5 h-5 rounded border-slate-300 text-[#007856] focus:ring-[#007856]/20 cursor-pointer"
+          />
+          <label htmlFor="confirm-transfer" className="text-sm font-medium text-slate-700 cursor-pointer select-none">
+            I confirm that the {transferType === 'deposit' ? 'deposit' : 'transfer'} details above are accurate and I authorize this transaction.
+          </label>
+        </div>
+
+        <button
+          onClick={handleProcess}
+          disabled={loading || !isConfirmed}
+          className="w-full flex items-center justify-center gap-3 py-5 bg-[#007856] text-white font-bold rounded-2xl hover:bg-[#006045] transition-all shadow-lg shadow-emerald-200 disabled:opacity-50"
+        >
                   {loading ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
@@ -1017,6 +1083,7 @@ export default function Transfer() {
                   setDescription('');
                   setBeneficiaryName('');
                   setAccountNumber('');
+                  setIsConfirmed(false);
                 }}
                 className="w-full py-4 bg-slate-50 text-slate-600 font-bold rounded-2xl hover:bg-slate-100 transition-all"
               >

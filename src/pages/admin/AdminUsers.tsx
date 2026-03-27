@@ -608,6 +608,17 @@ export default function AdminUsers() {
                 </th>
                 <th 
                   className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest cursor-pointer hover:text-slate-600 transition-colors"
+                  onClick={() => handleSort('email')}
+                >
+                  <div className="flex items-center gap-2">
+                    Email
+                    {sortConfig.key === 'email' ? (
+                      sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
+                    ) : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                  </div>
+                </th>
+                <th 
+                  className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest cursor-pointer hover:text-slate-600 transition-colors"
                   onClick={() => handleSort('balance')}
                 >
                   <div className="flex items-center gap-2">
@@ -674,9 +685,11 @@ export default function AdminUsers() {
                       </div>
                       <div className="flex flex-col">
                         <span className="text-sm font-bold text-slate-900">{user.full_name}</span>
-                        <span className="text-xs text-slate-500">{user.email}</span>
                       </div>
                     </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className="text-xs text-slate-500 font-medium">{user.email}</span>
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-sm font-bold text-slate-900">

@@ -155,24 +155,29 @@ export default function AdminLoans() {
 
         if (loanError) throw loanError;
 
-        // 3. Increment user balance
-        const { error: balanceError } = await supabase
-          .from('profiles')
-          .update({ balance: (loan.profiles?.balance || 0) + loan.amount })
-          .eq('id', loan.user_id);
-
-        if (balanceError) throw balanceError;
-
-        // 4. Create transaction record
+        // 3. Create transaction records - This will trigger the balance update via update_profile_balance trigger
+        // 3a. Disbursement to checking
         const { error: txError } = await supabase
           .from('transactions')
-          .insert([{
-            user_id: loan.user_id,
-            amount: loan.amount,
-            description: `Loan Disbursement: ${loan.amount.toLocaleString()} USD`,
-            status: 'released',
-            type: 'credit'
-          }]);
+          .insert([
+            {
+              user_id: loan.user_id,
+              amount: loan.amount,
+              description: `Loan Disbursement: ${loan.amount.toLocaleString()} USD`,
+              status: 'released',
+              type: 'credit',
+              balance_type: 'checking'
+            },
+            // 3b. Record the debt in loan balance
+            {
+              user_id: loan.user_id,
+              amount: loan.amount,
+              description: `Loan Debt Recorded: ${loan.amount.toLocaleString()} USD`,
+              status: 'released',
+              type: 'credit',
+              balance_type: 'loan'
+            }
+          ]);
 
         if (txError) throw txError;
 
