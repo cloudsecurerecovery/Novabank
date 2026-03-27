@@ -81,6 +81,10 @@ export default function Layout() {
 
   const navItems = [
     { name: 'Accounts', path: '/dashboard', icon: Building2 },
+    { name: 'Cards', path: '/cards', icon: CreditCard },
+    { name: 'Savings', path: '/savings', icon: PiggyBank },
+    { name: 'Loans', path: '/loans', icon: Banknote },
+    { name: 'Investments', path: '/investments', icon: LineChart },
     { name: 'Transactions', path: '/transactions', icon: Clock },
     { name: 'Transfer', path: '/transfer', icon: DollarSign },
     { name: 'Profile', path: '/profile', icon: UserCircle },
@@ -294,7 +298,7 @@ export default function Layout() {
 
       {/* Bottom Navigation for Mobile */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-4 py-3 flex justify-between items-center z-50 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] overflow-x-auto">
-        {allNavItems.slice(0, 5).map((item) => {
+        {allNavItems.slice(0, 6).map((item) => {
           const isActive = location.pathname === item.path;
           return (
             <Link

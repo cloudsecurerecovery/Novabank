@@ -87,10 +87,26 @@ interface AuditLog {
   };
 }
 
+interface BillPayment {
+  id: string;
+  user_id: string;
+  biller_name: string;
+  account_number: string;
+  amount: number;
+  status: 'pending' | 'scheduled' | 'completed' | 'failed';
+  scheduled_date: string;
+  created_at: string;
+  profiles: {
+    full_name: string;
+    email: string;
+  };
+}
+
 export default function AdminDashboard() {
   const { user: currentUser } = useAuthStore();
   const [pendingTransactions, setPendingTransactions] = useState<PendingTransaction[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<PendingTransaction[]>([]);
+  const [billPayments, setBillPayments] = useState<BillPayment[]>([]);
   const [recentLogs, setRecentLogs] = useState<AuditLog[]>([]);
   const [securityEvents, setSecurityEvents] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -111,7 +127,7 @@ export default function AdminDashboard() {
     pending_bills_count: 0,
     total_investments_volume: 0
   });
-  const [activeTab, setActiveTab] = useState<'pending' | 'recent'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'recent' | 'bills'>('pending');
   const [isBroadcastModalOpen, setIsBroadcastModalOpen] = useState(false);
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [sendingBroadcast, setSendingBroadcast] = useState(false);
@@ -204,6 +220,16 @@ export default function AdminDashboard() {
         setSecurityEvents(security || []);
       }
 
+      // Fetch bill payments
+      const { data: bills, error: billsError } = await supabase
+        .from('bill_payments')
+        .select('*, profiles(full_name, email)')
+        .order('created_at', { ascending: false });
+
+      if (!billsError) {
+        setBillPayments(bills || []);
+      }
+
     } catch (err) {
       console.error('Error fetching admin data:', err);
       toast.error('Failed to load admin dashboard');
@@ -234,6 +260,51 @@ export default function AdminDashboard() {
     } catch (err) {
       console.error('Error updating transaction:', err);
       toast.error('Failed to update transaction');
+    }
+  };
+
+  const handleBillStatusUpdate = async (id: string, newStatus: BillPayment['status']) => {
+    try {
+      const { error } = await supabase
+        .from('bill_payments')
+        .update({ status: newStatus })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      if (currentUser) {
+        await auditService.log(currentUser.id, 'bill_payment_status_change', {
+          bill_id: id,
+          new_status: newStatus
+        });
+      }
+
+      toast.success(`Bill status updated to ${newStatus}`);
+      fetchData();
+    } catch (err) {
+      console.error('Error updating bill status:', err);
+      toast.error('Failed to update bill status');
+    }
+  };
+
+  const handleAdminPayBill = async (billId: string) => {
+    if (!confirm('Are you sure you want to process this bill payment? This will deduct funds from the user\'s balance.')) return;
+    
+    try {
+      const { error } = await supabase.rpc('admin_pay_bill', { target_bill_id: billId });
+      if (error) throw error;
+      
+      if (currentUser) {
+        await auditService.log(currentUser.id, 'admin_bill_payment_process', {
+          bill_id: billId
+        });
+      }
+
+      toast.success('Bill processed successfully');
+      fetchData();
+    } catch (err: any) {
+      console.error('Error processing bill:', err);
+      toast.error(err.message || 'Failed to process bill payment');
     }
   };
 
@@ -752,6 +823,12 @@ export default function AdminDashboard() {
             >
               Recent Activity
             </button>
+            <button 
+              onClick={() => setActiveTab('bills')}
+              className={`text-xl font-bold transition-colors ${activeTab === 'bills' ? 'text-slate-900' : 'text-slate-300 hover:text-slate-400'}`}
+            >
+              Bill Payments
+            </button>
           </div>
           <div className="flex items-center gap-4">
             <Link 
@@ -839,7 +916,7 @@ export default function AdminDashboard() {
                     </tr>
                   ))
                 )
-              ) : (
+              ) : activeTab === 'recent' ? (
                 recentTransactions.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-6 py-12 text-center text-slate-400 font-medium">
@@ -884,6 +961,69 @@ export default function AdminDashboard() {
                         >
                           <Eye className="w-5 h-5" />
                         </button>
+                      </td>
+                    </tr>
+                  ))
+                )
+              ) : (
+                billPayments.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-12 text-center text-slate-400 font-medium">
+                      No bill payments found.
+                    </td>
+                  </tr>
+                ) : (
+                  billPayments.map((bill) => (
+                    <tr key={bill.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col">
+                          <span className="text-sm font-bold text-slate-900">{bill.profiles?.full_name}</span>
+                          <span className="text-xs text-slate-500">{bill.profiles?.email}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-sm font-bold text-slate-900">
+                          ${bill.amount.toLocaleString()}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col">
+                          <span className="text-sm text-slate-600 font-medium">{bill.biller_name}</span>
+                          <span className={`text-[10px] font-bold uppercase tracking-widest ${
+                            bill.status === 'completed' ? 'text-emerald-500' : 
+                            bill.status === 'failed' ? 'text-rose-500' : 'text-amber-500'
+                          }`}>
+                            {bill.status}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">
+                          {format(new Date(bill.scheduled_date), 'MMM dd, yyyy')}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {['pending', 'scheduled'].includes(bill.status) && (
+                            <button
+                              onClick={() => handleAdminPayBill(bill.id)}
+                              className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                              title="Process Payment"
+                            >
+                              <CreditCard className="w-4 h-4" />
+                            </button>
+                          )}
+                          <select
+                            value={bill.status}
+                            onChange={(e) => handleBillStatusUpdate(bill.id, e.target.value as BillPayment['status'])}
+                            className="text-xs font-bold bg-slate-50 border-none rounded-lg focus:ring-2 focus:ring-[#007856]/20 transition-all"
+                          >
+                            <option value="pending">Pending</option>
+                            <option value="scheduled">Scheduled</option>
+                            <option value="completed">Completed</option>
+                            <option value="failed">Failed</option>
+                          </select>
+                        </div>
                       </td>
                     </tr>
                   ))

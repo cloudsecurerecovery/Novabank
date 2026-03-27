@@ -1072,6 +1072,53 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- P. Admin Pay Bill RPC
+CREATE OR REPLACE FUNCTION admin_pay_bill(
+  target_bill_id UUID
+) RETURNS BOOLEAN AS $$
+DECLARE
+  target_user_id UUID;
+  current_user_balance NUMERIC;
+  bill_amount NUMERIC;
+  biller TEXT;
+  is_admin_user BOOLEAN;
+BEGIN
+  -- Security Check: Only admins can call this
+  SELECT is_admin INTO is_admin_user FROM profiles WHERE id = auth.uid();
+  IF NOT is_admin_user THEN
+    RAISE EXCEPTION 'Unauthorized: Only admins can process bills';
+  END IF;
+
+  -- Get data
+  SELECT user_id, amount, biller_name INTO target_user_id, bill_amount, biller 
+  FROM bill_payments WHERE id = target_bill_id;
+
+  IF target_user_id IS NULL THEN
+    RAISE EXCEPTION 'Bill not found';
+  END IF;
+
+  -- Get user balance
+  SELECT balance INTO current_user_balance FROM profiles WHERE id = target_user_id;
+
+  -- Validation
+  IF current_user_balance < bill_amount THEN
+    RAISE EXCEPTION 'Insufficient funds in user account';
+  END IF;
+
+  -- Atomic Transaction
+  -- 1. Debit User
+  INSERT INTO transactions (user_id, amount, status, description)
+  VALUES (target_user_id, -bill_amount, 'released', 'Bill Payment (Admin Processed): ' || biller);
+
+  -- 2. Update Bill
+  UPDATE bill_payments
+  SET status = 'completed'
+  WHERE id = target_bill_id;
+
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- RLS POLICIES (Continued)
 
 ALTER TABLE bill_payments ENABLE ROW LEVEL SECURITY;
@@ -1082,6 +1129,11 @@ ALTER TABLE exchange_rates ENABLE ROW LEVEL SECURITY;
 -- Bill Payments
 CREATE POLICY "Users can manage their own bill payments" ON bill_payments
   FOR ALL USING (auth.uid() = user_id);
+
+CREATE POLICY "Admins have full access to bill payments" ON bill_payments
+  FOR ALL USING (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
+  );
 
 -- Investments
 CREATE POLICY "Users can manage their own investments" ON investments

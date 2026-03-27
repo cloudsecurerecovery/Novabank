@@ -663,6 +663,10 @@ Thank you for banking with NovaBank.
                 <Upload className="w-6 h-6 mb-2 text-slate-400 group-hover:text-[#007856]" />
                 <span className="text-xs font-bold">Deposit</span>
               </Link>
+              <Link to="/cards" className="flex flex-col items-center justify-center p-4 rounded-2xl bg-slate-50 hover:bg-emerald-50 hover:text-[#007856] transition-all group border border-transparent hover:border-emerald-100">
+                <CreditCard className="w-6 h-6 mb-2 text-slate-400 group-hover:text-[#007856]" />
+                <span className="text-xs font-bold">Cards</span>
+              </Link>
               <Link to="/bill-pay" className="flex flex-col items-center justify-center p-4 rounded-2xl bg-slate-50 hover:bg-emerald-50 hover:text-[#007856] transition-all group border border-transparent hover:border-emerald-100">
                 <Receipt className="w-6 h-6 mb-2 text-slate-400 group-hover:text-[#007856]" />
                 <span className="text-xs font-bold">Pay Bills</span>

@@ -246,67 +246,101 @@ export default function Cards() {
                 layout
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="group"
+                whileHover={{ y: -8, scale: 1.02 }}
+                transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                className="group relative"
               >
                 {/* Visual Card */}
-                <div className={`relative h-52 rounded-3xl p-8 text-white overflow-hidden shadow-2xl transition-all duration-500 ${
-                  card.status === 'frozen' ? 'grayscale' : ''
-                } ${
-                  card.card_type === 'credit' 
-                    ? 'bg-gradient-to-br from-slate-800 to-slate-950' 
-                    : 'bg-gradient-to-br from-[#007856] to-[#004d37]'
-                }`}>
+                <motion.div 
+                  layout
+                  className={`relative h-56 rounded-[2.5rem] p-8 text-white overflow-hidden shadow-2xl transition-all duration-700 ${
+                    card.status === 'frozen' ? 'grayscale contrast-75' : ''
+                  } ${
+                    card.card_type === 'credit' 
+                      ? 'bg-gradient-to-br from-slate-800 via-slate-900 to-black' 
+                      : 'bg-gradient-to-br from-[#007856] via-[#008a63] to-[#004d37]'
+                  }`}
+                >
+                  {/* Shimmer Effect */}
+                  <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-1000">
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out" />
+                  </div>
+
                   {/* Card Background Pattern */}
-                  <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -mr-32 -mt-32 blur-3xl" />
-                  <div className="absolute bottom-0 left-0 w-32 h-32 bg-black/10 rounded-full -ml-16 -mb-16 blur-2xl" />
+                  <div className="absolute top-0 right-0 w-72 h-72 bg-white/10 rounded-full -mr-36 -mt-36 blur-3xl animate-pulse" />
+                  <div className="absolute bottom-0 left-0 w-40 h-40 bg-black/20 rounded-full -ml-20 -mb-20 blur-2xl" />
                   
                   <div className="relative h-full flex flex-col justify-between">
                     <div className="flex justify-between items-start">
                       <div className="flex flex-col">
-                        <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">NovaBank {card.card_type}</span>
-                        <ShieldCheck className="w-5 h-5 mt-1 opacity-80" />
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/80">NovaBank</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-widest ${
+                            card.card_type === 'credit' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                          }`}>
+                            {card.card_type}
+                          </span>
+                        </div>
+                        <ShieldCheck className="w-6 h-6 mt-2 text-white/90" />
                       </div>
-                      <div className="w-12 h-8 bg-white/20 rounded-md backdrop-blur-sm" />
+                      <div className="flex flex-col items-end">
+                        <div className="w-14 h-10 bg-gradient-to-br from-amber-200/40 to-amber-500/40 rounded-lg backdrop-blur-md border border-white/10 shadow-inner" />
+                        <span className="text-[8px] font-bold mt-1 opacity-60 uppercase tracking-tighter">Secure Chip</span>
+                      </div>
                     </div>
 
-                    <div>
-                      <div className="flex items-center gap-3">
-                        <p className="text-xl font-mono tracking-[0.2em]">
+                    <div className="space-y-6">
+                      <div className="flex items-center gap-4">
+                        <p className="text-2xl font-mono tracking-[0.25em] drop-shadow-lg">
                           {showNumbers[card.id] ? card.card_number : `•••• •••• •••• ${card.card_number.slice(-4)}`}
                         </p>
                         <button 
                           onClick={() => toggleShowNumber(card.id)}
-                          className="p-1 hover:bg-white/10 rounded-md transition-all"
+                          className="p-2 hover:bg-white/10 rounded-xl transition-all backdrop-blur-sm border border-white/5"
                         >
                           {showNumbers[card.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
-                      <div className="flex justify-between items-end mt-6">
-                        <div>
-                          <p className="text-[8px] font-bold uppercase tracking-widest opacity-60">Card Holder</p>
-                          <p className="text-sm font-bold tracking-wide">{card.card_holder_name}</p>
+                      
+                      <div className="flex justify-between items-end">
+                        <div className="space-y-1">
+                          <p className="text-[8px] font-black uppercase tracking-[0.2em] text-white/50">Card Holder</p>
+                          <p className="text-sm font-bold tracking-wider uppercase">{card.card_holder_name}</p>
                         </div>
-                        <div className="text-right">
-                          <p className="text-[8px] font-bold uppercase tracking-widest opacity-60">Expires</p>
-                          <p className="text-sm font-bold tracking-wide">{card.expiry_date}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[8px] font-bold uppercase tracking-widest opacity-60">CVV</p>
-                          <p className="text-sm font-bold tracking-wide">{showNumbers[card.id] ? card.cvv : '•••'}</p>
+                        <div className="flex gap-8">
+                          <div className="text-right space-y-1">
+                            <p className="text-[8px] font-black uppercase tracking-[0.2em] text-white/50">Expires</p>
+                            <p className="text-sm font-bold tracking-widest">{card.expiry_date}</p>
+                          </div>
+                          <div className="text-right space-y-1">
+                            <p className="text-[8px] font-black uppercase tracking-[0.2em] text-white/50">CVV</p>
+                            <p className="text-sm font-bold tracking-widest">{showNumbers[card.id] ? card.cvv : '•••'}</p>
+                          </div>
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  {card.status === 'frozen' && (
-                    <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px] flex items-center justify-center">
-                      <div className="bg-white/90 px-4 py-2 rounded-full flex items-center gap-2 shadow-xl">
-                        <Lock className="w-4 h-4 text-slate-900" />
-                        <span className="text-xs font-bold text-slate-900 uppercase tracking-widest">Frozen</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                  <AnimatePresence>
+                    {card.status === 'frozen' && (
+                      <motion.div 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="absolute inset-0 bg-slate-900/60 backdrop-blur-[3px] flex items-center justify-center"
+                      >
+                        <motion.div 
+                          initial={{ scale: 0.8, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          className="bg-white px-6 py-3 rounded-2xl flex items-center gap-3 shadow-2xl border border-slate-100"
+                        >
+                          <Lock className="w-5 h-5 text-slate-900" />
+                          <span className="text-sm font-black text-slate-900 uppercase tracking-[0.2em]">Frozen</span>
+                        </motion.div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
 
                 {/* Card Actions */}
                 <div className="mt-4 flex items-center gap-2">

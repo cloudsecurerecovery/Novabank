@@ -13,6 +13,7 @@ import Dashboard from './pages/Dashboard';
 import Transfer from './pages/Transfer';
 import Profile from './pages/Profile';
 import Cards from './pages/Cards';
+import Deposit from './pages/Deposit';
 import Notifications from './pages/Notifications';
 import SupportChat from './pages/SupportChat';
 import Transactions from './pages/Transactions';
@@ -171,7 +172,7 @@ export default function App() {
             {/* User Routes */}
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/transfer" element={<Transfer />} />
-            <Route path="/deposit" element={<Transfer />} />
+            <Route path="/deposit" element={<Deposit />} />
             <Route path="/wire-transfer" element={<Transfer />} />
             <Route path="/transactions" element={<Transactions />} />
             <Route path="/profile" element={<Profile />} />

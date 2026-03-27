@@ -316,22 +316,22 @@ export default function AdminSupport() {
                 messages.map((msg) => (
                   <div 
                     key={msg.id}
-                    className={`flex ${msg.sender_id === adminUser?.id ? 'justify-end' : 'justify-start'}`}
+                    className={`flex ${msg.sender_id === 'admin' ? 'justify-end' : 'justify-start'}`}
                   >
                     <div className={`max-w-[80%] space-y-1`}>
                       <div className={`p-4 rounded-2xl text-sm font-medium shadow-sm ${
-                        msg.sender_id === adminUser?.id 
+                        msg.sender_id === 'admin' 
                           ? 'bg-[#007856] text-white rounded-tr-none' 
                           : 'bg-white text-slate-700 rounded-tl-none border border-slate-100'
                       }`}>
                         {msg.message}
                       </div>
                       <div className={`flex items-center gap-2 text-[10px] text-slate-400 font-bold uppercase tracking-widest ${
-                        msg.sender_id === adminUser?.id ? 'justify-end' : 'justify-start'
+                        msg.sender_id === 'admin' ? 'justify-end' : 'justify-start'
                       }`}>
                         <Clock className="w-3 h-3" />
                         {format(new Date(msg.created_at), 'HH:mm')}
-                        {msg.sender_id === adminUser?.id && (
+                        {msg.sender_id === 'admin' && (
                           <CheckCircle2 className={`w-3 h-3 ${msg.is_read ? 'text-emerald-500' : 'text-slate-300'}`} />
                         )}
                       </div>

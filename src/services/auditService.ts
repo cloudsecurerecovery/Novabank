@@ -37,7 +37,9 @@ export type AuditAction =
   | 'loan_application_update'
   | 'admin_update_loan'
   | 'savings_goal_update'
-  | 'recurring_payment_processed';
+  | 'recurring_payment_processed'
+  | 'bill_payment_status_change'
+  | 'admin_bill_payment_process';
 
 export interface AuditLog {
   id: string;
