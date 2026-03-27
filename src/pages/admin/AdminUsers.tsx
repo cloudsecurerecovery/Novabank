@@ -29,7 +29,10 @@ import {
   Edit3,
   Wallet,
   Landmark,
-  LineChart
+  LineChart,
+  ChevronUp,
+  ChevronDown,
+  ArrowUpDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
@@ -79,6 +82,16 @@ export default function AdminUsers() {
     phone: ''
   });
   const [updatingProfile, setUpdatingProfile] = useState(false);
+  const [balanceMode, setBalanceMode] = useState<'set' | 'adjust'>('set');
+  const [adjustmentAmount, setAdjustmentAmount] = useState<string>('');
+  const [adjustmentType, setAdjustmentType] = useState<'credit' | 'debit'>('credit');
+  const [targetBalanceType, setTargetBalanceType] = useState<'checking' | 'savings' | 'loan' | 'investment'>('checking');
+  const [adjustmentDescription, setAdjustmentDescription] = useState<string>('');
+  const [sortConfig, setSortConfig] = useState<{ key: keyof UserProfile; direction: 'asc' | 'desc' }>({ key: 'created_at', direction: 'desc' });
+  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterKYC, setFilterKYC] = useState<string>('all');
+  const [filterRole, setFilterRole] = useState<string>('all');
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
 
   useEffect(() => {
     fetchUsers();
@@ -259,6 +272,9 @@ export default function AdminUsers() {
     setNewSavingsBalance((user.savings_balance || 0).toString());
     setNewLoanBalance((user.loan_balance || 0).toString());
     setNewInvestmentBalance((user.investment_balance || 0).toString());
+    setBalanceMode('set');
+    setAdjustmentAmount('');
+    setAdjustmentDescription('');
     setIsEditBalanceModalOpen(true);
   };
 
@@ -361,49 +377,112 @@ export default function AdminUsers() {
 
     try {
       setAdjustingBalance(true);
-      const updates = {
-        balance: Number(newBalance) || 0,
-        savings_balance: Number(newSavingsBalance) || 0,
-        loan_balance: Number(newLoanBalance) || 0,
-        investment_balance: Number(newInvestmentBalance) || 0
-      };
 
-      const { error } = await supabase
-        .from('profiles')
-        .update(updates)
-        .eq('id', selectedUser.id);
+      if (balanceMode === 'set') {
+        const balanceTypes: ('checking' | 'savings' | 'loan' | 'investment')[] = ['checking', 'savings', 'loan', 'investment'];
+        const newBalances = [
+          Number(newBalance) || 0,
+          Number(newSavingsBalance) || 0,
+          Number(newLoanBalance) || 0,
+          Number(newInvestmentBalance) || 0
+        ];
 
-      if (error) throw error;
+        for (let i = 0; i < balanceTypes.length; i++) {
+          const type = balanceTypes[i];
+          const newVal = newBalances[i];
+          const oldVal = i === 0 ? selectedUser.balance : 
+                        i === 1 ? selectedUser.savings_balance :
+                        i === 2 ? selectedUser.loan_balance :
+                        selectedUser.investment_balance;
+
+          if (newVal !== (oldVal || 0)) {
+            const { error } = await supabase.rpc('admin_set_balance', {
+              target_user_id: selectedUser.id,
+              new_balance: newVal,
+              balance_type: type
+            });
+            if (error) throw error;
+          }
+        }
+      } else {
+        if (!adjustmentAmount || isNaN(Number(adjustmentAmount))) {
+          toast.error('Please enter a valid amount');
+          return;
+        }
+
+        const amount = Number(adjustmentAmount) * (adjustmentType === 'debit' ? -1 : 1);
+        const { error } = await supabase.rpc('admin_adjust_balance', {
+          target_user_id: selectedUser.id,
+          amount: amount,
+          description: adjustmentDescription || `Admin ${adjustmentType === 'credit' ? 'Credit' : 'Debit'} (${targetBalanceType})`,
+          balance_type: targetBalanceType
+        });
+
+        if (error) throw error;
+      }
 
       // Log the action
       if (currentUser) {
         await auditService.log(currentUser.id, 'admin_balance_adjustment', {
           target_user_id: selectedUser.id,
-          old_balances: {
-            balance: selectedUser.balance,
-            savings: selectedUser.savings_balance,
-            loans: selectedUser.loan_balance,
-            investments: selectedUser.investment_balance
-          },
-          new_balances: updates
+          mode: balanceMode,
+          details: balanceMode === 'set' ? {
+            checking: newBalance,
+            savings: newSavingsBalance,
+            loan: newLoanBalance,
+            investment: newInvestmentBalance
+          } : {
+            type: targetBalanceType,
+            amount: adjustmentAmount,
+            action: adjustmentType
+          }
         });
       }
 
       toast.success('Balances updated successfully');
       setIsEditBalanceModalOpen(false);
       fetchUsers();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error updating balance:', err);
-      toast.error('Failed to update balance');
+      toast.error(err.message || 'Failed to update balance');
     } finally {
       setAdjustingBalance(false);
     }
   };
 
-  const filteredUsers = users.filter(user => 
-    user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    user.email?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const handleSort = (key: keyof UserProfile) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const filteredUsers = users
+    .filter(user => {
+      const matchesSearch = 
+        user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.email?.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      const matchesStatus = filterStatus === 'all' || user.account_status === filterStatus;
+      const matchesKYC = filterKYC === 'all' || user.kyc_status === filterKYC;
+      const matchesRole = filterRole === 'all' || (filterRole === 'admin' ? user.is_admin : !user.is_admin);
+
+      return matchesSearch && matchesStatus && matchesKYC && matchesRole;
+    })
+    .sort((a, b) => {
+      const aValue = a[sortConfig.key];
+      const bValue = b[sortConfig.key];
+
+      if (aValue === undefined || bValue === undefined) return 0;
+
+      if (aValue < bValue) {
+        return sortConfig.direction === 'asc' ? -1 : 1;
+      }
+      if (aValue > bValue) {
+        return sortConfig.direction === 'asc' ? 1 : -1;
+      }
+      return 0;
+    });
 
   if (loading) {
     return (
@@ -431,9 +510,83 @@ export default function AdminUsers() {
               className="pl-12 pr-6 py-3 bg-white border border-slate-100 rounded-2xl text-sm focus:ring-2 focus:ring-[#007856]/20 transition-all w-full md:w-64"
             />
           </div>
-          <button className="p-3 bg-white border border-slate-100 rounded-2xl text-slate-400 hover:text-slate-600 transition-colors">
-            <Filter className="w-5 h-5" />
-          </button>
+          <div className="relative">
+            <button 
+              onClick={() => setIsFilterOpen(!isFilterOpen)}
+              className={`p-3 bg-white border border-slate-100 rounded-2xl transition-colors ${isFilterOpen ? 'text-[#007856] ring-2 ring-[#007856]/20' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              <Filter className="w-5 h-5" />
+            </button>
+
+            <AnimatePresence>
+              {isFilterOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  className="absolute right-0 mt-4 w-72 bg-white rounded-[24px] shadow-2xl border border-slate-100 p-6 z-50 space-y-4"
+                >
+                  <div className="flex justify-between items-center mb-2">
+                    <h3 className="text-sm font-bold text-slate-900">Filters</h3>
+                    <button 
+                      onClick={() => {
+                        setFilterStatus('all');
+                        setFilterKYC('all');
+                        setFilterRole('all');
+                      }}
+                      className="text-[10px] font-bold text-[#007856] hover:underline"
+                    >
+                      Reset All
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Account Status</label>
+                      <select 
+                        value={filterStatus}
+                        onChange={(e) => setFilterStatus(e.target.value)}
+                        className="w-full px-4 py-2 bg-slate-50 border-none rounded-xl text-xs font-bold focus:ring-2 focus:ring-[#007856]/20"
+                      >
+                        <option value="all">All Statuses</option>
+                        <option value="active">Active</option>
+                        <option value="frozen">Frozen</option>
+                        <option value="deleted">Deleted</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">KYC Status</label>
+                      <select 
+                        value={filterKYC}
+                        onChange={(e) => setFilterKYC(e.target.value)}
+                        className="w-full px-4 py-2 bg-slate-50 border-none rounded-xl text-xs font-bold focus:ring-2 focus:ring-[#007856]/20"
+                      >
+                        <option value="all">All KYC</option>
+                        <option value="verified">Verified</option>
+                        <option value="pending">Pending</option>
+                        <option value="rejected">Rejected</option>
+                        <option value="unverified">Unverified</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Role</label>
+                      <select 
+                        value={filterRole}
+                        onChange={(e) => setFilterRole(e.target.value)}
+                        className="w-full px-4 py-2 bg-slate-50 border-none rounded-xl text-xs font-bold focus:ring-2 focus:ring-[#007856]/20"
+                      >
+                        <option value="all">All Roles</option>
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
 
@@ -442,10 +595,72 @@ export default function AdminUsers() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/50">
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">User Details</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Balance</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Role</th>
+                <th 
+                  className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest cursor-pointer hover:text-slate-600 transition-colors"
+                  onClick={() => handleSort('full_name')}
+                >
+                  <div className="flex items-center gap-2">
+                    User Details
+                    {sortConfig.key === 'full_name' ? (
+                      sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
+                    ) : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                  </div>
+                </th>
+                <th 
+                  className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest cursor-pointer hover:text-slate-600 transition-colors"
+                  onClick={() => handleSort('balance')}
+                >
+                  <div className="flex items-center gap-2">
+                    Balance
+                    {sortConfig.key === 'balance' ? (
+                      sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
+                    ) : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                  </div>
+                </th>
+                <th 
+                  className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest cursor-pointer hover:text-slate-600 transition-colors"
+                  onClick={() => handleSort('account_status')}
+                >
+                  <div className="flex items-center gap-2">
+                    Status
+                    {sortConfig.key === 'account_status' ? (
+                      sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
+                    ) : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                  </div>
+                </th>
+                <th 
+                  className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest cursor-pointer hover:text-slate-600 transition-colors"
+                  onClick={() => handleSort('is_admin')}
+                >
+                  <div className="flex items-center gap-2">
+                    Role
+                    {sortConfig.key === 'is_admin' ? (
+                      sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
+                    ) : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                  </div>
+                </th>
+                <th 
+                  className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest cursor-pointer hover:text-slate-600 transition-colors"
+                  onClick={() => handleSort('kyc_status')}
+                >
+                  <div className="flex items-center gap-2">
+                    KYC
+                    {sortConfig.key === 'kyc_status' ? (
+                      sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
+                    ) : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                  </div>
+                </th>
+                <th 
+                  className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest cursor-pointer hover:text-slate-600 transition-colors"
+                  onClick={() => handleSort('created_at')}
+                >
+                  <div className="flex items-center gap-2">
+                    Join Date
+                    {sortConfig.key === 'created_at' ? (
+                      sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
+                    ) : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                  </div>
+                </th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Actions</th>
               </tr>
             </thead>
@@ -497,6 +712,21 @@ export default function AdminUsers() {
                         {user.is_admin ? 'Admin' : 'User'}
                       </span>
                     </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                      user.kyc_status === 'verified' ? 'bg-emerald-50 text-emerald-600' : 
+                      user.kyc_status === 'pending' ? 'bg-blue-50 text-blue-600' :
+                      user.kyc_status === 'rejected' ? 'bg-rose-50 text-rose-600' :
+                      'bg-slate-50 text-slate-600'
+                    }`}>
+                      {user.kyc_status}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                      {format(new Date(user.created_at), 'MMM dd, yyyy')}
+                    </span>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
@@ -795,62 +1025,139 @@ export default function AdminUsers() {
                     <p className="text-xs text-slate-500">{selectedUser.email}</p>
                   </div>
 
+                  <div className="flex p-1 bg-slate-100 rounded-2xl">
+                    <button
+                      onClick={() => setBalanceMode('set')}
+                      className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
+                        balanceMode === 'set' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                      }`}
+                    >
+                      Set Balance
+                    </button>
+                    <button
+                      onClick={() => setBalanceMode('adjust')}
+                      className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
+                        balanceMode === 'adjust' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                      }`}
+                    >
+                      Credit / Debit
+                    </button>
+                  </div>
+
                   <div className="space-y-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Checking Balance (USD)</label>
-                      <div className="relative">
-                        <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                        <input 
-                          type="number"
-                          value={newBalance}
-                          onChange={(e) => setNewBalance(e.target.value)}
-                          className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl text-lg font-bold focus:ring-2 focus:ring-[#007856]/20 transition-all"
-                          placeholder="0.00"
-                        />
-                      </div>
-                    </div>
+                    {balanceMode === 'set' ? (
+                      <>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Checking Balance (USD)</label>
+                          <div className="relative">
+                            <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                            <input 
+                              type="number"
+                              value={newBalance}
+                              onChange={(e) => setNewBalance(e.target.value)}
+                              className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl text-lg font-bold focus:ring-2 focus:ring-[#007856]/20 transition-all"
+                              placeholder="0.00"
+                            />
+                          </div>
+                        </div>
 
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Savings Balance (USD)</label>
-                      <div className="relative">
-                        <Wallet className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                        <input 
-                          type="number"
-                          value={newSavingsBalance}
-                          onChange={(e) => setNewSavingsBalance(e.target.value)}
-                          className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl text-lg font-bold focus:ring-2 focus:ring-[#007856]/20 transition-all"
-                          placeholder="0.00"
-                        />
-                      </div>
-                    </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Savings Balance (USD)</label>
+                          <div className="relative">
+                            <Wallet className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                            <input 
+                              type="number"
+                              value={newSavingsBalance}
+                              onChange={(e) => setNewSavingsBalance(e.target.value)}
+                              className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl text-lg font-bold focus:ring-2 focus:ring-[#007856]/20 transition-all"
+                              placeholder="0.00"
+                            />
+                          </div>
+                        </div>
 
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Loan Balance (USD)</label>
-                      <div className="relative">
-                        <Landmark className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                        <input 
-                          type="number"
-                          value={newLoanBalance}
-                          onChange={(e) => setNewLoanBalance(e.target.value)}
-                          className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl text-lg font-bold focus:ring-2 focus:ring-[#007856]/20 transition-all"
-                          placeholder="0.00"
-                        />
-                      </div>
-                    </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Loan Balance (USD)</label>
+                          <div className="relative">
+                            <Landmark className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                            <input 
+                              type="number"
+                              value={newLoanBalance}
+                              onChange={(e) => setNewLoanBalance(e.target.value)}
+                              className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl text-lg font-bold focus:ring-2 focus:ring-[#007856]/20 transition-all"
+                              placeholder="0.00"
+                            />
+                          </div>
+                        </div>
 
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Investment Balance (USD)</label>
-                      <div className="relative">
-                        <LineChart className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                        <input 
-                          type="number"
-                          value={newInvestmentBalance}
-                          onChange={(e) => setNewInvestmentBalance(e.target.value)}
-                          className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl text-lg font-bold focus:ring-2 focus:ring-[#007856]/20 transition-all"
-                          placeholder="0.00"
-                        />
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Investment Balance (USD)</label>
+                          <div className="relative">
+                            <LineChart className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                            <input 
+                              type="number"
+                              value={newInvestmentBalance}
+                              onChange={(e) => setNewInvestmentBalance(e.target.value)}
+                              className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl text-lg font-bold focus:ring-2 focus:ring-[#007856]/20 transition-all"
+                              placeholder="0.00"
+                            />
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Action</label>
+                            <select
+                              value={adjustmentType}
+                              onChange={(e) => setAdjustmentType(e.target.value as 'credit' | 'debit')}
+                              className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-[#007856]/20 transition-all"
+                            >
+                              <option value="credit">Credit (+)</option>
+                              <option value="debit">Debit (-)</option>
+                            </select>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Account</label>
+                            <select
+                              value={targetBalanceType}
+                              onChange={(e) => setTargetBalanceType(e.target.value as any)}
+                              className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-[#007856]/20 transition-all"
+                            >
+                              <option value="checking">Checking</option>
+                              <option value="savings">Savings</option>
+                              <option value="loan">Loan</option>
+                              <option value="investment">Investment</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Amount (USD)</label>
+                          <div className="relative">
+                            <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                            <input 
+                              type="number"
+                              value={adjustmentAmount}
+                              onChange={(e) => setAdjustmentAmount(e.target.value)}
+                              className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl text-lg font-bold focus:ring-2 focus:ring-[#007856]/20 transition-all"
+                              placeholder="0.00"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Description (Optional)</label>
+                          <input 
+                            type="text"
+                            value={adjustmentDescription}
+                            onChange={(e) => setAdjustmentDescription(e.target.value)}
+                            className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl text-sm font-medium focus:ring-2 focus:ring-[#007856]/20 transition-all"
+                            placeholder="e.g. Manual credit for deposit"
+                          />
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
 
                   <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 flex items-start gap-3">

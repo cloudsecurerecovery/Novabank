@@ -1119,6 +1119,89 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- Q. Admin Adjust Balance RPC
+CREATE OR REPLACE FUNCTION admin_adjust_balance(
+  target_user_id UUID,
+  amount NUMERIC,
+  description TEXT,
+  balance_type TEXT -- 'checking', 'savings', 'loan', 'investment'
+) RETURNS BOOLEAN AS $$
+DECLARE
+  is_admin_user BOOLEAN;
+BEGIN
+  -- Security Check: Only admins can call this
+  SELECT is_admin INTO is_admin_user FROM profiles WHERE id = auth.uid();
+  IF NOT is_admin_user THEN
+    RAISE EXCEPTION 'Unauthorized: Only admins can adjust balances';
+  END IF;
+
+  -- Update the appropriate balance
+  IF balance_type = 'checking' THEN
+    UPDATE profiles SET balance = balance + amount WHERE id = target_user_id;
+  ELSIF balance_type = 'savings' THEN
+    UPDATE profiles SET savings_balance = COALESCE(savings_balance, 0) + amount WHERE id = target_user_id;
+  ELSIF balance_type = 'loan' THEN
+    UPDATE profiles SET loan_balance = COALESCE(loan_balance, 0) + amount WHERE id = target_user_id;
+  ELSIF balance_type = 'investment' THEN
+    UPDATE profiles SET investment_balance = COALESCE(investment_balance, 0) + amount WHERE id = target_user_id;
+  ELSE
+    RAISE EXCEPTION 'Invalid balance type';
+  END IF;
+
+  -- Insert transaction record
+  INSERT INTO transactions (user_id, amount, status, description, type)
+  VALUES (target_user_id, amount, 'released', description, CASE WHEN amount >= 0 THEN 'credit' ELSE 'debit' END);
+
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- R. Admin Set Balance RPC
+CREATE OR REPLACE FUNCTION admin_set_balance(
+  target_user_id UUID,
+  new_balance NUMERIC,
+  balance_type TEXT -- 'checking', 'savings', 'loan', 'investment'
+) RETURNS BOOLEAN AS $$
+DECLARE
+  is_admin_user BOOLEAN;
+  old_balance NUMERIC;
+  diff NUMERIC;
+BEGIN
+  -- Security Check: Only admins can call this
+  SELECT is_admin INTO is_admin_user FROM profiles WHERE id = auth.uid();
+  IF NOT is_admin_user THEN
+    RAISE EXCEPTION 'Unauthorized: Only admins can set balances';
+  END IF;
+
+  -- Get old balance and update
+  IF balance_type = 'checking' THEN
+    SELECT balance INTO old_balance FROM profiles WHERE id = target_user_id;
+    UPDATE profiles SET balance = new_balance WHERE id = target_user_id;
+  ELSIF balance_type = 'savings' THEN
+    SELECT COALESCE(savings_balance, 0) INTO old_balance FROM profiles WHERE id = target_user_id;
+    UPDATE profiles SET savings_balance = new_balance WHERE id = target_user_id;
+  ELSIF balance_type = 'loan' THEN
+    SELECT COALESCE(loan_balance, 0) INTO old_balance FROM profiles WHERE id = target_user_id;
+    UPDATE profiles SET loan_balance = new_balance WHERE id = target_user_id;
+  ELSIF balance_type = 'investment' THEN
+    SELECT COALESCE(investment_balance, 0) INTO old_balance FROM profiles WHERE id = target_user_id;
+    UPDATE profiles SET investment_balance = new_balance WHERE id = target_user_id;
+  ELSE
+    RAISE EXCEPTION 'Invalid balance type';
+  END IF;
+
+  diff := new_balance - old_balance;
+
+  -- Insert transaction record for the difference
+  IF diff <> 0 THEN
+    INSERT INTO transactions (user_id, amount, status, description, type)
+    VALUES (target_user_id, diff, 'released', 'Admin Balance Correction (' || balance_type || ')', CASE WHEN diff >= 0 THEN 'credit' ELSE 'debit' END);
+  END IF;
+
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- RLS POLICIES (Continued)
 
 ALTER TABLE bill_payments ENABLE ROW LEVEL SECURITY;
