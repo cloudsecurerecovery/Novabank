@@ -32,7 +32,6 @@ import AdminLoans from './pages/admin/AdminLoans';
 import AdminSavings from './pages/admin/AdminSavings';
 import AdminTransactions from './pages/admin/AdminTransactions';
 import AdminInvestments from './pages/admin/AdminInvestments';
-import AdminLogin from './pages/admin/AdminLogin';
 import NotFound from './pages/NotFound';
 import Layout from './components/Layout';
 import { ProtectedRoute, AdminRoute } from './components/ProtectedRoute';
@@ -161,7 +160,6 @@ export default function App() {
       <Toaster />
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route path="/admin/login" element={<AdminLogin />} />
         <Route path="/register" element={<Register />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
@@ -186,19 +184,21 @@ export default function App() {
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/support" element={<SupportChat />} />
 
-            {/* Admin Routes */}
-            <Route element={<AdminRoute />}>
-              <Route path="/admin" element={<AdminDashboard />} />
-              <Route path="/admin/users" element={<AdminUsers />} />
-              <Route path="/admin/audit" element={<AdminAuditLogs />} />
-              <Route path="/admin/support" element={<AdminSupport />} />
-              <Route path="/admin/settings" element={<AdminSettings />} />
-              <Route path="/admin/notifications" element={<AdminNotifications />} />
-              <Route path="/admin/loans" element={<AdminLoans />} />
-              <Route path="/admin/savings" element={<AdminSavings />} />
-              <Route path="/admin/transactions" element={<AdminTransactions />} />
-              <Route path="/admin/investments" element={<AdminInvestments />} />
-            </Route>
+            {/* Admin Routes - Only rendered for admins to keep them private */}
+            {user?.is_admin && (
+              <Route element={<AdminRoute />}>
+                <Route path="/admin" element={<AdminDashboard />} />
+                <Route path="/admin/users" element={<AdminUsers />} />
+                <Route path="/admin/audit" element={<AdminAuditLogs />} />
+                <Route path="/admin/support" element={<AdminSupport />} />
+                <Route path="/admin/settings" element={<AdminSettings />} />
+                <Route path="/admin/notifications" element={<AdminNotifications />} />
+                <Route path="/admin/loans" element={<AdminLoans />} />
+                <Route path="/admin/savings" element={<AdminSavings />} />
+                <Route path="/admin/transactions" element={<AdminTransactions />} />
+                <Route path="/admin/investments" element={<AdminInvestments />} />
+              </Route>
+            )}
           </Route>
         </Route>
 

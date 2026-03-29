@@ -528,12 +528,21 @@ Thank you for banking with NovaBank.
                             {Number(tx.amount) >= 0 ? '+' : ''}${Math.abs(Number(tx.amount)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            <button
-                              onClick={() => toggleExpand(tx.id)}
-                              className="p-1 rounded-lg hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors"
-                            >
-                              {expandedTxId === tx.id ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                            </button>
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                onClick={() => downloadReceipt(tx)}
+                                className="p-1 rounded-lg hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors"
+                                title="Download Receipt"
+                              >
+                                <Download className="w-5 h-5" />
+                              </button>
+                              <button
+                                onClick={() => toggleExpand(tx.id)}
+                                className="p-1 rounded-lg hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors"
+                              >
+                                {expandedTxId === tx.id ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                              </button>
+                            </div>
                           </td>
                         </tr>
                         <AnimatePresence>

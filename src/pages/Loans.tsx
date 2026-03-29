@@ -36,6 +36,7 @@ export default function Loans() {
   const [isApplying, setIsApplying] = useState(false);
   const [amount, setAmount] = useState('');
   const [term, setTerm] = useState('12');
+  const [dueDate, setDueDate] = useState(format(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd'));
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -45,10 +46,12 @@ export default function Loans() {
   }, [user]);
 
   const fetchLoans = async () => {
+    if (!user) return;
     try {
       const { data, error } = await supabase
         .from('loans')
         .select('*')
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -61,22 +64,44 @@ export default function Loans() {
     }
   };
 
+  const calculateMonthlyPayment = (principal: number, annualRate: number, months: number) => {
+    if (!principal || !months) return 0;
+    const monthlyRate = annualRate / 12;
+    if (monthlyRate === 0) return principal / months;
+    const payment = (principal * monthlyRate * Math.pow(1 + monthlyRate, months)) / (Math.pow(1 + monthlyRate, months) - 1);
+    return payment;
+  };
+
+  const monthlyPayment = amount ? calculateMonthlyPayment(parseFloat(amount), 0.055, parseInt(term)) : 0;
+  const totalRepayment = monthlyPayment * parseInt(term);
+  const totalInterest = totalRepayment - (parseFloat(amount) || 0);
+
   const handleApply = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !amount || isSubmitting) return;
 
     setIsSubmitting(true);
     try {
-      const { data, error } = await supabase.rpc('apply_for_loan', {
-        loan_amount: parseFloat(amount),
-        loan_term: parseInt(term)
-      });
+      // We use direct insert because the RPC doesn't support the due date field yet
+      const { data, error } = await supabase
+        .from('loans')
+        .insert([{
+          user_id: user.id,
+          amount: parseFloat(amount),
+          term_months: parseInt(term),
+          status: 'pending',
+          remaining_balance: parseFloat(amount),
+          next_payment_date: new Date(dueDate).toISOString()
+        }])
+        .select()
+        .single();
 
       if (error) throw error;
 
       toast.success('Loan application submitted successfully!');
       setIsApplying(false);
       setAmount('');
+      setDueDate(format(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd'));
       fetchLoans();
     } catch (err: any) {
       console.error('Error applying for loan:', err);
@@ -175,9 +200,10 @@ export default function Loans() {
             <thead>
               <tr className="bg-slate-50/50">
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Loan Details</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Amount</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Amount</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Monthly</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Remaining</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Remaining</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Next Payment</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Action</th>
               </tr>
@@ -203,21 +229,33 @@ export default function Loans() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 text-right">
                       <span className="text-sm font-bold text-slate-900">${loan.amount.toLocaleString()}</span>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <span className="text-sm font-bold text-[#007856]">
+                        ${(loan.monthly_payment || calculateMonthlyPayment(loan.amount, loan.interest_rate / 100, loan.term_months)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
                     </td>
                     <td className="px-6 py-4">
                       <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${getStatusColor(loan.status)}`}>
                         {loan.status}
                       </span>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 text-right">
                       <span className="text-sm font-bold text-slate-900">${loan.remaining_balance.toLocaleString()}</span>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="text-xs text-slate-500 font-medium">
-                        {loan.next_payment_date ? format(new Date(loan.next_payment_date), 'MMM dd, yyyy') : '-'}
-                      </span>
+                      <div className="flex flex-col">
+                        <span className="text-sm font-bold text-slate-900">
+                          {loan.next_payment_date ? format(new Date(loan.next_payment_date), 'MMM dd, yyyy') : '-'}
+                        </span>
+                        {(loan.status === 'active' || (loan.status === 'pending' && loan.next_payment_date)) && (
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                            {loan.status === 'active' ? 'Next Due Date' : 'Preferred Due Date'}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4">
                       {loan.status === 'active' && (
@@ -300,16 +338,42 @@ export default function Loans() {
                   </select>
                 </div>
 
-                <div className="bg-slate-50 p-6 rounded-2xl space-y-3">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-slate-500 font-medium">Estimated Interest Rate</span>
-                    <span className="text-slate-900 font-bold">5.5% APR</span>
+                <div className="space-y-2">
+                  <label className="text-sm font-bold text-slate-700 uppercase tracking-wider">Preferred First Payment Date</label>
+                  <div className="relative">
+                    <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                    <input 
+                      type="date"
+                      required
+                      min={format(new Date(), 'yyyy-MM-dd')}
+                      value={dueDate}
+                      onChange={(e) => setDueDate(e.target.value)}
+                      className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl text-slate-900 focus:ring-2 focus:ring-[#007856]/20 transition-all font-bold"
+                    />
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-slate-500 font-medium">Monthly Payment</span>
-                    <span className="text-slate-900 font-bold">
-                      ${amount ? (parseFloat(amount) * (1 + 0.055) / parseInt(term)).toFixed(2) : '0.00'}
-                    </span>
+                </div>
+
+                <div className="bg-slate-50 p-6 rounded-3xl space-y-4 border border-slate-100">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-medium">Interest Rate (APR)</span>
+                    <span className="text-[#007856] font-bold bg-emerald-50 px-3 py-1 rounded-full text-xs">5.50%</span>
+                  </div>
+                  
+                  <div className="space-y-2 pt-2 border-t border-slate-200/60">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500 font-medium">Monthly Payment</span>
+                      <span className="text-slate-900 font-black text-lg">
+                        ${monthlyPayment.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-400 font-medium">Total Interest</span>
+                      <span className="text-slate-600 font-bold">${totalInterest.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-400 font-medium">Total Repayment</span>
+                      <span className="text-slate-600 font-bold">${totalRepayment.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
                   </div>
                 </div>
 

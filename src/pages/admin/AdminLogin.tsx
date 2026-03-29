@@ -20,7 +20,7 @@ export default function AdminLogin() {
     if (user?.is_admin) {
       return <Navigate to="/admin" replace />;
     } else {
-      return <Navigate to="/dashboard" replace />;
+      return <Navigate to="/not-found" replace />;
     }
   }
 
@@ -55,12 +55,6 @@ export default function AdminLogin() {
           timestamp: new Date().toISOString()
         });
         
-        // Special case for the provided admin credentials if they don't exist in Auth yet
-        if (email === 'ositalan5@gmail.com' && password === 'Longlife@1355') {
-          toast.success('Admin credentials recognized. Initializing secure session...');
-          // We can't force sign-in without Auth, but we can guide the user
-          setError('Please ensure you have registered this account first. Once registered, it will be automatically granted admin privileges.');
-        }
         throw supabaseError;
       }
 

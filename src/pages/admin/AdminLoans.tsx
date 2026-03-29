@@ -80,6 +80,14 @@ export default function AdminLoans() {
     }
   }, [page, activeTab]);
 
+  const calculateMonthlyPayment = (principal: number, annualRate: number, months: number) => {
+    if (!principal || !months) return 0;
+    const monthlyRate = (annualRate / 100) / 12;
+    if (monthlyRate === 0) return principal / months;
+    const payment = (principal * monthlyRate * Math.pow(1 + monthlyRate, months)) / (Math.pow(1 + monthlyRate, months) - 1);
+    return payment;
+  };
+
   const fetchLoans = async () => {
     try {
       setLoading(true);
@@ -233,13 +241,20 @@ export default function AdminLoans() {
 
     try {
       setUpdatingLoan(true);
+      const monthly_payment = calculateMonthlyPayment(
+        editLoanData.amount,
+        editLoanData.interest_rate,
+        editLoanData.term_months
+      );
+
       const { error } = await supabase
         .from('loans')
         .update({
           amount: editLoanData.amount,
           interest_rate: editLoanData.interest_rate,
           term_months: editLoanData.term_months,
-          status: editLoanData.status
+          status: editLoanData.status,
+          monthly_payment
         })
         .eq('id', selectedLoan.id);
 

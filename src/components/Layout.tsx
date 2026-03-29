@@ -1,9 +1,10 @@
 import { Link, useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { Building2, LogOut, LayoutDashboard, UserCircle, MessageSquare, DollarSign, Clock, Menu, X, ArrowDownLeft, Globe, Bell, CreditCard, Shield, Users, History, Settings, PiggyBank, Banknote, Receipt, LineChart, Gift, Loader2, ShieldAlert } from 'lucide-react';
+import { Building2, LogOut, LayoutDashboard, UserCircle, MessageSquare, DollarSign, Clock, Menu, X, ArrowDownLeft, Globe, Bell, CreditCard, Shield, Users, History, Settings, PiggyBank, Banknote, Receipt, LineChart, Gift, Loader2, ShieldAlert, ChevronRight } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { AvatarImage } from './AvatarImage';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export default function Layout() {
   const { user, logout } = useAuthStore();
@@ -80,7 +81,7 @@ export default function Layout() {
   };
 
   const navItems = [
-    { name: 'Accounts', path: '/dashboard', icon: Building2 },
+    { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
     { name: 'Cards', path: '/cards', icon: CreditCard },
     { name: 'Savings', path: '/savings', icon: PiggyBank },
     { name: 'Loans', path: '/loans', icon: Banknote },
@@ -184,146 +185,150 @@ export default function Layout() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F4F6F8] flex flex-col font-sans">
-      {/* Top Header - M&T Green */}
-      <header className="bg-[#007856] text-white shadow-md sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            {/* Logo area */}
-            <div className="flex items-center gap-2">
-              <Building2 className="h-8 w-8 text-[#FFB612]" />
-              <span className="text-xl font-bold tracking-tight">NovaBank</span>
+    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans">
+      {/* Sidebar - Desktop */}
+      <aside className="hidden md:flex w-72 bg-slate-900 text-white flex-col fixed h-full z-30 shadow-2xl">
+        <div className="p-8">
+          <div className="flex items-center gap-3 mb-10">
+            <div className="h-10 w-10 bg-[#007856] rounded-xl flex items-center justify-center shadow-lg shadow-emerald-900/20">
+              <Shield className="h-6 w-6 text-[#FFB612]" />
             </div>
-
-            {/* Desktop Navigation */}
-            <nav className="hidden md:flex items-center space-x-6">
-              {allNavItems.map((item) => {
-                const isActive = location.pathname === item.path;
-                return (
-                  <Link
-                    key={item.name}
-                    to={item.path}
-                    className={`text-xs lg:text-sm font-medium transition-colors hover:text-[#FFB612] ${
-                      isActive ? 'text-[#FFB612] border-b-2 border-[#FFB612] pb-1' : 'text-white'
-                    }`}
-                  >
-                    {item.name}
-                  </Link>
-                );
-              })}
-            </nav>
-
-            {/* User Actions */}
-            <div className="hidden md:flex items-center gap-6">
-              <Link 
-                to="/notifications" 
-                className="relative p-2 text-white hover:text-[#FFB612] transition-colors"
-              >
-                <Bell className="h-6 w-6" />
-                {notificationCount > 0 && (
-                  <span className="absolute top-1 right-1 bg-red-500 text-white text-[10px] font-bold h-4 w-4 rounded-full flex items-center justify-center border-2 border-[#007856]">
-                    {notificationCount}
-                  </span>
-                )}
-              </Link>
-              <div className="flex items-center gap-3">
-                <div className="h-8 w-8 rounded-full bg-white/10 flex items-center justify-center overflow-hidden border border-white/20">
-                  <AvatarImage 
-                    avatarUrl={user?.avatar_url} 
-                    fullName={user?.full_name} 
-                  />
-                </div>
-                <span className="text-sm font-medium">Welcome, {user?.full_name?.split(' ')[0]}</span>
-              </div>
-              <button 
-                onClick={handleLogout} 
-                className="flex items-center gap-2 text-sm font-medium text-white hover:text-[#FFB612] transition-colors"
-              >
-                <LogOut className="h-4 w-4" />
-                Log Out
-              </button>
-            </div>
-
-            {/* Mobile menu button */}
-            <div className="md:hidden flex items-center">
-              <button
-                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                className="text-white hover:text-[#FFB612] focus:outline-none"
-              >
-                {isMobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-              </button>
-            </div>
+            <span className="text-xl font-black tracking-tighter uppercase italic">
+              Nova<span className="text-[#FFB612]">Bank</span>
+            </span>
           </div>
+          
+          <nav className="space-y-1.5">
+            {allNavItems.map((item) => (
+              <Link
+                key={item.path}
+                to={item.path}
+                className={`flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all duration-300 group ${
+                  location.pathname === item.path
+                    ? 'bg-[#007856] text-white shadow-lg shadow-emerald-900/40'
+                    : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                }`}
+              >
+                <item.icon className={`h-5 w-5 transition-transform duration-300 group-hover:scale-110 ${
+                  location.pathname === item.path ? 'text-white' : 'text-slate-500'
+                }`} />
+                <span className="font-bold text-sm tracking-wide">{item.name}</span>
+              </Link>
+            ))}
+          </nav>
         </div>
 
-        {/* Mobile Navigation */}
-        {isMobileMenuOpen && (
-          <div className="md:hidden bg-[#006045] border-t border-[#007856]">
-            <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
-              {allNavItems.map((item) => {
-                const isActive = location.pathname === item.path;
-                return (
-                  <Link
-                    key={item.name}
-                    to={item.path}
-                    onClick={() => setIsMobileMenuOpen(false)}
-                    className={`block px-3 py-2 rounded-md text-base font-medium ${
-                      isActive ? 'bg-[#007856] text-[#FFB612]' : 'text-white hover:bg-[#007856] hover:text-[#FFB612]'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <item.icon className="h-5 w-5" />
-                      {item.name}
-                    </div>
-                  </Link>
-                );
-              })}
-              <button
-                onClick={handleLogout}
-                className="w-full text-left block px-3 py-2 rounded-md text-base font-medium text-white hover:bg-[#007856] hover:text-[#FFB612]"
-              >
-                <div className="flex items-center gap-3">
-                  <LogOut className="h-5 w-5" />
-                  Log Out
-                </div>
-              </button>
+        <div className="mt-auto p-8 border-t border-slate-800/50 bg-slate-900/50 backdrop-blur-sm">
+          <div className="flex items-center gap-4 mb-6">
+            <div className="h-12 w-12 rounded-2xl overflow-hidden ring-2 ring-slate-800 shadow-xl">
+              <AvatarImage avatarUrl={user?.avatar_url} fullName={user?.full_name} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold truncate text-white">{user?.full_name}</p>
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest truncate">{user?.email}</p>
             </div>
           </div>
-        )}
-      </header>
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-slate-800 text-slate-400 hover:bg-red-500 hover:text-white transition-all duration-300 font-bold text-sm group shadow-lg"
+          >
+            <LogOut className="h-4 w-4 transition-transform group-hover:-translate-x-1" />
+            Sign Out
+          </button>
+        </div>
+      </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-24 md:pb-8">
-        <Outlet />
+      <main className="flex-1 md:ml-72 min-h-screen flex flex-col pb-24 md:pb-0">
+        {/* Header - Mobile & Desktop */}
+        <header className="sticky top-0 z-20 bg-white/80 backdrop-blur-xl border-b border-slate-100 px-4 md:px-10 h-20 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="md:hidden flex items-center gap-2">
+              <div className="h-8 w-8 bg-[#007856] rounded-lg flex items-center justify-center">
+                <Shield className="h-5 w-5 text-[#FFB612]" />
+              </div>
+              <span className="text-lg font-black tracking-tighter uppercase italic">
+                Nova<span className="text-[#FFB612]">B</span>
+              </span>
+            </div>
+            <div className="hidden md:block">
+              <h1 className="text-xl font-black text-slate-900 tracking-tight">
+                {allNavItems.find(item => item.path === location.pathname)?.name || 'Dashboard'}
+              </h1>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 md:gap-5">
+            <div className="hidden sm:flex flex-col items-end mr-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Server Status</span>
+              <div className="flex items-center gap-1.5">
+                <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-xs font-bold text-slate-600">Secure Connection</span>
+              </div>
+            </div>
+
+            <Link 
+              to="/notifications" 
+              className="relative p-2.5 bg-slate-50 rounded-xl hover:bg-slate-100 transition-all group"
+            >
+              <Bell className="h-5 w-5 text-slate-600 group-hover:scale-110 transition-transform" />
+              {notificationCount > 0 && (
+                <span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 text-white text-[10px] font-black flex items-center justify-center rounded-full ring-4 ring-white shadow-lg">
+                  {notificationCount > 9 ? '9+' : notificationCount}
+                </span>
+              )}
+            </Link>
+
+            <Link to="/profile" className="md:hidden h-10 w-10 rounded-xl overflow-hidden ring-2 ring-slate-100 shadow-md">
+              <AvatarImage avatarUrl={user?.avatar_url} fullName={user?.full_name} />
+            </Link>
+          </div>
+        </header>
+
+        {/* Page Content */}
+        <div className="p-4 md:p-10 max-w-7xl mx-auto w-full">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={location.pathname}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
+            >
+              <Outlet />
+            </motion.div>
+          </AnimatePresence>
+        </div>
       </main>
 
-      {/* Bottom Navigation for Mobile */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-4 py-3 flex justify-between items-center z-50 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] overflow-x-auto">
-        {allNavItems.slice(0, 6).map((item) => {
-          const isActive = location.pathname === item.path;
-          return (
-            <Link
-              key={item.name}
-              to={item.path}
-              className={`flex flex-col items-center gap-1 transition-colors min-w-[60px] ${
-                isActive ? 'text-[#007856]' : 'text-slate-400'
-              }`}
-            >
-              <item.icon className={`h-6 w-6 ${isActive ? 'fill-emerald-50' : ''}`} />
-              <span className="text-[10px] font-bold uppercase tracking-wider">{item.name.split(' ')[0]}</span>
-            </Link>
-          );
-        })}
+      {/* Mobile Bottom Navigation */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-100 px-6 py-3 z-40 flex items-center justify-between shadow-[0_-10px_30px_rgba(0,0,0,0.05)]">
+        {allNavItems.slice(0, 5).map((item) => (
+          <Link
+            key={item.path}
+            to={item.path}
+            className={`flex flex-col items-center gap-1 transition-all duration-300 ${
+              location.pathname === item.path ? 'text-[#007856] scale-110' : 'text-slate-400'
+            }`}
+          >
+            <div className={`p-2 rounded-xl transition-all ${
+              location.pathname === item.path ? 'bg-[#007856]/10' : ''
+            }`}>
+              <item.icon className="h-5 w-5" />
+            </div>
+            <span className="text-[10px] font-black uppercase tracking-tighter">{item.name.split(' ')[0]}</span>
+          </Link>
+        ))}
+        <button
+          onClick={handleLogout}
+          className="flex flex-col items-center gap-1 text-slate-400 hover:text-red-500 transition-all"
+        >
+          <div className="p-2 rounded-xl">
+            <LogOut className="h-5 w-5" />
+          </div>
+          <span className="text-[10px] font-black uppercase tracking-tighter">Exit</span>
+        </button>
       </nav>
-
-      {/* Footer - Hidden on mobile to save space for bottom nav if needed, or kept simple */}
-      <footer className="hidden md:block bg-white border-t border-slate-200 mt-auto">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <p className="text-center text-sm text-slate-500">
-            © {new Date().getFullYear()} NovaBank. Equal Housing Lender. Member FDIC.
-          </p>
-        </div>
-      </footer>
     </div>
   );
 }
